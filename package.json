@@ -1,0 +1,20 @@
+{
+  "name": "the-league-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "",
+  "main": "index",
+  "scripts": {
+    "dev_api": "npm run dev --workspace api",
+    "dev_web": "npm run dev --workspace web",
+    "dev_all": "npm run dev_api & npm run dev_web",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ]
+}

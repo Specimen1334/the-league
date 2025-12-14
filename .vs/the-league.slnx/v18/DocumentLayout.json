@@ -1,0 +1,408 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\Git\\FantasyLeague\\the-league\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\settings\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\settings\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\teams\\[teamId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\teams\\[teamId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\server.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\api\\src\\server.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\login\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\(auth)\\login\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\forgot-password\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\(auth)\\forgot-password\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\matches\\[matchId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\matches\\[matchId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.standings.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\api\\src\\routes\\seasons\\seasons.standings.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\profile\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\profile\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\pokedex\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\pokedex\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\marketplace\\[seasonId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\marketplace\\[seasonId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\leagues\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\[leagueId]\\seasons\\[seasonId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\leagues\\[leagueId]\\seasons\\[seasonId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\[leagueId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\leagues\\[leagueId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\inbox\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\inbox\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\draft\\[seasonId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\draft\\[seasonId]\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\dashboard\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\dashboard\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\admin\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\admin\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\.env.local||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\.env.local||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\register\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\app\\(auth)\\register\\page.tsx||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.matches.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\api\\src\\routes\\seasons\\seasons.matches.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.base.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\api\\src\\routes\\seasons\\seasons.base.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\auth.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\api\\src\\routes\\auth.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Git\\FantasyLeague\\the-league\\apps\\web\\next.config.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:apps\\web\\next.config.ts||{0F2454B1-A556-402D-A7D0-1FDE7F99DEE0}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 3,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 22,
+              "Title": "next.config.ts",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\next.config.ts",
+              "RelativeDocumentMoniker": "apps\\web\\next.config.ts",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\next.config.ts",
+              "RelativeToolTip": "apps\\web\\next.config.ts",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T02:02:02.423Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "server.ts",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\server.ts",
+              "RelativeDocumentMoniker": "apps\\api\\src\\server.ts",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\server.ts",
+              "RelativeToolTip": "apps\\api\\src\\server.ts",
+              "ViewState": "AgIAAFYAAAAAAAAAAAAIwGUAAAAvAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:32:13.737Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\teams\\[teamId]\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\teams\\[teamId]\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\teams\\[teamId]\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\teams\\[teamId]\\page.tsx",
+              "ViewState": "AgIAAKwEAAAAAAAAAAAnwLwEAAAfAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:30:33.408Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\settings\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\settings\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\settings\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\settings\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:30:26.142Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\profile\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\profile\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\profile\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\profile\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:30:17.267Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\pokedex\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\pokedex\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\pokedex\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\pokedex\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:30:08.47Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\matches\\[matchId]\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\matches\\[matchId]\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\matches\\[matchId]\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\matches\\[matchId]\\page.tsx",
+              "ViewState": "AgIAADQEAAAAAAAAAAAYwEcEAAAuAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:30:00.22Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\marketplace\\[seasonId]\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\marketplace\\[seasonId]\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\marketplace\\[seasonId]\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\marketplace\\[seasonId]\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:29:51.158Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\leagues\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\leagues\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:29:41.986Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\[leagueId]\\seasons\\[seasonId]\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\leagues\\[leagueId]\\seasons\\[seasonId]\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\[leagueId]\\seasons\\[seasonId]\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\leagues\\[leagueId]\\seasons\\[seasonId]\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:29:33.298Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\[leagueId]\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\leagues\\[leagueId]\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\leagues\\[leagueId]\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\leagues\\[leagueId]\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:29:23.751Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\forgot-password\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\(auth)\\forgot-password\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\forgot-password\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\(auth)\\forgot-password\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAvAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-10T21:11:15.97Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\login\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\(auth)\\login\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\login\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\(auth)\\login\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAvAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:27:28.689Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 13,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\inbox\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\inbox\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\inbox\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\inbox\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:29:13.142Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 14,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\draft\\[seasonId]\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\draft\\[seasonId]\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\draft\\[seasonId]\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\draft\\[seasonId]\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:29:02.017Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 15,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\dashboard\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\dashboard\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\dashboard\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\dashboard\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:28:42.47Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "seasons.standings.ts",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.standings.ts",
+              "RelativeDocumentMoniker": "apps\\api\\src\\routes\\seasons\\seasons.standings.ts",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.standings.ts",
+              "RelativeToolTip": "apps\\api\\src\\routes\\seasons\\seasons.standings.ts",
+              "ViewState": "AgIAABwAAAAAAAAAAAAnwCwAAAAkAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-10T21:11:01.91Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 16,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\admin\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\admin\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\admin\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\admin\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAUAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:28:30.751Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 18,
+              "Title": "page.tsx",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\register\\page.tsx",
+              "RelativeDocumentMoniker": "apps\\web\\app\\(auth)\\register\\page.tsx",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\app\\(auth)\\register\\page.tsx",
+              "RelativeToolTip": "apps\\web\\app\\(auth)\\register\\page.tsx",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAQAAAAsAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-11T01:27:52.345Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 17,
+              "Title": ".env.local",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\.env.local",
+              "RelativeDocumentMoniker": "apps\\web\\.env.local",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\web\\.env.local",
+              "RelativeToolTip": "apps\\web\\.env.local",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2025-12-11T01:26:29.969Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 19,
+              "Title": "seasons.matches.ts",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.matches.ts",
+              "RelativeDocumentMoniker": "apps\\api\\src\\routes\\seasons\\seasons.matches.ts",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.matches.ts",
+              "RelativeToolTip": "apps\\api\\src\\routes\\seasons\\seasons.matches.ts",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAgAAAAtAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-10T21:10:45.423Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 20,
+              "Title": "seasons.base.ts",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.base.ts",
+              "RelativeDocumentMoniker": "apps\\api\\src\\routes\\seasons\\seasons.base.ts",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\seasons\\seasons.base.ts",
+              "RelativeToolTip": "apps\\api\\src\\routes\\seasons\\seasons.base.ts",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAkAAAAtAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-10T21:10:21.267Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 21,
+              "Title": "auth.ts",
+              "DocumentMoniker": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\auth.ts",
+              "RelativeDocumentMoniker": "apps\\api\\src\\routes\\auth.ts",
+              "ToolTip": "D:\\Git\\FantasyLeague\\the-league\\apps\\api\\src\\routes\\auth.ts",
+              "RelativeToolTip": "apps\\api\\src\\routes\\auth.ts",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAUAAAAxAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003213|",
+              "WhenOpened": "2025-12-10T21:10:13.304Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
