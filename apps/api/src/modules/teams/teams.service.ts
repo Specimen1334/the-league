@@ -1,6 +1,9 @@
 // apps/api/src/modules/teams/teams.service.ts
 import type { AppUser } from "../../shared/types";
+import { seasonsRepo } from "../seasons/seasons.repo";
+import { draftRepo } from "../draft/draft.repo";
 import { teamsRepo } from "./teams.repo";
+import { pokedexRepo } from "../pokedex/pokedex.repo";
 import {
   mapItemRowToInventoryItem,
   mapMatchRowToSummary,
@@ -89,9 +92,16 @@ export const teamsService = {
       )
     );
 
-    const rosterPreview = roster
-      .slice(0, 6)
-      .map((row) => mapRosterRowToPokemon(row));
+    const rosterPreview = roster.slice(0, 6).map((row) => {
+      const ancestors = pokedexRepo.listAncestorForms(row.pokemonId);
+      const usableForms = ancestors.map((a) => ({
+        pokemonId: a.pokemonId,
+        speciesName: a.name,
+        formName: a.formName,
+        dexNumber: a.dexNumber
+      }));
+      return mapRosterRowToPokemon(row, usableForms);
+    });
 
     // Placeholder notifications (hooked into inbox later).
     const notifications: TeamHubOverviewResponse["notifications"] = [];
@@ -100,7 +110,7 @@ export const teamsService = {
       team: {
         id: team.id,
         seasonId: team.seasonId,
-        leagueId: null, // can be filled once league-season join is wired
+        leagueId: team.leagueId,
         name: team.name,
         logoUrl: team.logoUrl,
         bio: team.bio,
@@ -132,12 +142,26 @@ export const teamsService = {
     }
 
     const rosterRows = teamsRepo.listTeamRoster(team.id);
-    const pokemon = rosterRows.map((row) => mapRosterRowToPokemon(row));
+
+    const bench = rosterRows.map((row) => {
+      const ancestors = pokedexRepo.listAncestorForms(row.pokemonId);
+      const usableForms = ancestors.map((a) => ({
+        pokemonId: a.pokemonId,
+        speciesName: a.name,
+        formName: a.formName,
+        dexNumber: a.dexNumber
+      }));
+      return mapRosterRowToPokemon(row, usableForms);
+    });
 
     return {
       teamId: team.id,
       seasonId: team.seasonId,
-      pokemon
+      active: [],
+      bench,
+      maxActive: 6,
+      validationStatus: "OK",
+      validationMessages: []
     };
   },
 
@@ -220,6 +244,40 @@ export const teamsService = {
       throw err;
     }
 
+    const season = seasonsRepo.getSeasonById(seasonId);
+    if (!season) {
+      const err = new Error("Season not found");
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    if (season.leagueId == null) {
+      const err = new Error("Season is missing league context");
+      (err as any).statusCode = 500;
+      throw err;
+    }
+
+    const session = draftRepo.ensureSession(seasonId);
+    if (session.status !== "NotStarted" && session.status !== "Lobby") {
+      const err = new Error("Draft has already started");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    // Managers may self-join, but only before the draft starts.
+    // Season.status is used for broader lifecycle, but we gate team creation primarily by draft session.
+    // Explicitly closed states should still block joining even if a draft session is misconfigured.
+    if (
+      season.status === "Playoffs" ||
+      season.status === "Completed" ||
+      season.status === "Archived"
+    ) {
+      const err = new Error("Season is not open for team creation");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+
     // Prevent multiple teams per user in the same season.
     const existing = teamsRepo.getTeamBySeasonAndUser(seasonId, user.id);
     if (existing) {
@@ -228,13 +286,36 @@ export const teamsService = {
       throw err;
     }
 
-    const team = teamsRepo.createTeamForSeason(
-      seasonId,
-      user.id,
-      name,
-      body.logoUrl ?? null,
-      body.bio ?? null
-    );
+    let team;
+    try {
+      team = teamsRepo.createTeamForSeason(
+        season.leagueId,
+        seasonId,
+        user.id,
+        name,
+        body.logoUrl ?? null,
+        body.bio ?? null
+      );
+    } catch (e) {
+      const err = e as any;
+      const code = typeof err?.code === "string" ? err.code : undefined;
+      // These are typical better-sqlite3 constraint codes.
+      if (code && code.startsWith("SQLITE_CONSTRAINT")) {
+        const httpErr = new Error(
+          "Unable to create team due to a database constraint. " +
+            "This usually means the season/league references are invalid or the team already exists."
+        );
+        (httpErr as any).statusCode = 409;
+        (httpErr as any).error = "TeamCreateFailed";
+        (httpErr as any).details = { sqliteCode: code };
+        throw httpErr;
+      }
+
+      const httpErr = new Error(err?.message || "Failed to create team");
+      (httpErr as any).statusCode = 500;
+      (httpErr as any).error = "TeamCreateFailed";
+      throw httpErr;
+    }
 
     // Return the same structure as the Team Hub overview endpoint.
     return this.getTeamHubOverview(seasonId, team.id, user);

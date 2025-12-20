@@ -71,6 +71,8 @@ export type SeasonSettings = {
   pickTimerSeconds: number; // integer seconds
   roundCount: number; // integer rounds
   draftType: "Snake" | "Linear";
+  /** Maximum total draft points a team may spend. 0 means unlimited. */
+  draftPointCap: number;
   allowTrades: boolean;
   tradeDeadlineAt: string | null; // ISO 8601 or null (no deadline)
 };

@@ -104,6 +104,10 @@ const browseBaseSql = `
 const countBrowseBaseSql = `
   SELECT COUNT(*) AS cnt
   FROM pokedex_entries e
+  LEFT JOIN pokedex_season_overrides o
+    ON o.pokemon_id = e.id
+    AND (o.season_id = @seasonId OR @seasonId IS NULL)
+    AND (o.league_id = @leagueId OR @leagueId IS NULL)
 `;
 
 // Dynamic filters are appended in code.
@@ -128,7 +132,18 @@ const insertCostVoteStmt = dbFile.prepare<
   VALUES (?, ?, ?, ?, 'cost', ?, ?)
 `);
 
-const getSeasonOverrideStmt = dbFile.prepare<[number, number | null, number | null]>(`
+// NOTE: Use positional parameters only. Mixing positional `?` and named `@param`
+// triggers better-sqlite3 bind errors ("Too many parameter values were provided").
+//
+// Params:
+//  1) pokemonId
+//  2) seasonId (nullable)
+//  3) seasonId (nullable) - repeated for (? IS NULL OR season_id = ?)
+//  4) leagueId (nullable)
+//  5) leagueId (nullable) - repeated for (? IS NULL OR league_id = ?)
+const getSeasonOverrideStmt = dbFile.prepare<
+  [number, number | null, number | null, number | null, number | null]
+>(`
   SELECT
     league_id,
     season_id,
@@ -137,8 +152,8 @@ const getSeasonOverrideStmt = dbFile.prepare<[number, number | null, number | nu
     override_cost
   FROM pokedex_season_overrides
   WHERE pokemon_id = ?
-    AND (@seasonId IS NULL OR season_id = @seasonId)
-    AND (@leagueId IS NULL OR league_id = @leagueId)
+    AND (? IS NULL OR season_id = ?)
+    AND (? IS NULL OR league_id = ?)
   LIMIT 1
 `);
 
@@ -186,7 +201,9 @@ export const pokedexRepo = {
       maxCost,
       leagueId,
       seasonId,
-      sortBy = "name"
+      sortBy = "name",
+      legality,
+      draftableOnly
     } = query;
 
     const filters: string[] = [];
@@ -216,13 +233,38 @@ export const pokedexRepo = {
       params.maxCost = maxCost;
     }
 
+    if (draftableOnly) {
+      // Draftable by definition: base_cost is present. Overrides do not change draftability.
+      filters.push("e.base_cost IS NOT NULL");
+    }
+
+    if (legality === "allowed") {
+      filters.push("(o.is_banned IS NULL OR o.is_banned = 0)");
+    } else if (legality === "banned") {
+      filters.push("o.is_banned = 1");
+    }
+
     const whereClause =
       filters.length > 0 ? "WHERE " + filters.join(" AND ") : "";
 
     let orderClause = "ORDER BY e.name ASC";
-    if (sortBy === "cost") {
+    if (sortBy === "cost_low") {
       orderClause =
         "ORDER BY COALESCE(o.override_cost, e.base_cost) ASC, e.name ASC";
+    } else if (sortBy === "cost_high") {
+      orderClause =
+        "ORDER BY COALESCE(o.override_cost, e.base_cost) DESC, e.name ASC";
+    } else if (sortBy === "bst_high") {
+      // Requires SQLite JSON1 extension
+      const bstExpr = `(
+        COALESCE(json_extract(e.base_stats_json,'$.hp'),0)+
+        COALESCE(json_extract(e.base_stats_json,'$.atk'),0)+
+        COALESCE(json_extract(e.base_stats_json,'$.def'),0)+
+        COALESCE(json_extract(e.base_stats_json,'$.spa'),0)+
+        COALESCE(json_extract(e.base_stats_json,'$.spd'),0)+
+        COALESCE(json_extract(e.base_stats_json,'$.spe'),0)
+      )`;
+      orderClause = `ORDER BY ${bstExpr} DESC, e.name ASC`;
     }
 
     const offset = (page - 1) * limit;
@@ -236,29 +278,37 @@ export const pokedexRepo = {
     `;
 
     const countFilters: string[] = [];
-    const countParams: Record<string, any> = {};
+    const countParams: Record<string, any> = {
+      leagueId: leagueId ?? null,
+      seasonId: seasonId ?? null
+    };
     if (search) {
-      countFilters.push("name LIKE @search");
+      countFilters.push("e.name LIKE @search");
       countParams.search = `%${search}%`;
     }
     if (type) {
-      countFilters.push("types_json LIKE @type");
-      countParams.type = `%"${type}"%`;
+      countFilters.push("e.types_json LIKE @type");
+      countParams.type = `%%\"${type}\"%%`.replace(/%%/g, "%");
     }
     if (role) {
-      countFilters.push("roles_json LIKE @role");
-      countParams.role = `%"${role}"%`;
+      countFilters.push("e.roles_json LIKE @role");
+      countParams.role = `%%\"${role}\"%%`.replace(/%%/g, "%");
     }
-    if (minCost !== undefined || maxCost !== undefined) {
-      // For count, we approximate using base_cost bounds only
-      if (minCost !== undefined) {
-        countFilters.push("base_cost >= @minCost");
-        countParams.minCost = minCost;
-      }
-      if (maxCost !== undefined) {
-        countFilters.push("base_cost <= @maxCost");
-        countParams.maxCost = maxCost;
-      }
+    if (minCost !== undefined) {
+      countFilters.push("(COALESCE(o.override_cost, e.base_cost) >= @minCost)");
+      countParams.minCost = minCost;
+    }
+    if (maxCost !== undefined) {
+      countFilters.push("(COALESCE(o.override_cost, e.base_cost) <= @maxCost)");
+      countParams.maxCost = maxCost;
+    }
+    if (draftableOnly) {
+      countFilters.push("e.base_cost IS NOT NULL");
+    }
+    if (legality === "allowed") {
+      countFilters.push("(o.is_banned IS NULL OR o.is_banned = 0)");
+    } else if (legality === "banned") {
+      countFilters.push("o.is_banned = 1");
     }
 
     const countWhere =
@@ -279,7 +329,7 @@ export const pokedexRepo = {
     })[];
 
     const countStmt = dbFile.prepare(countSql);
-    const countRow = countStmt.get(countParams || {}) as { cnt: number } | undefined;
+    const countRow = countStmt.get(countParams) as { cnt: number } | undefined;
     const total = countRow?.cnt ?? 0;
 
     return { rows, total };
@@ -291,9 +341,13 @@ export const pokedexRepo = {
     seasonId?: number
   ): PokedexSeasonContext | undefined {
     const stmt = getSeasonOverrideStmt;
-    const row = stmt.get(pokemonId, seasonId ?? null, leagueId ?? null) as
-      | SeasonOverrideRow
-      | undefined;
+    const row = stmt.get(
+      pokemonId,
+      seasonId ?? null,
+      seasonId ?? null,
+      leagueId ?? null,
+      leagueId ?? null
+    ) as SeasonOverrideRow | undefined;
 
     if (!row) {
       return {

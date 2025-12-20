@@ -53,11 +53,25 @@ export type TeamRosterPokemon = {
   pokemonId: number;
   speciesName: string | null;
   nickname: string | null;
+  spriteUrl: string | null;
+  roles: string[];
+  baseCost: number | null;
   isActive: boolean;
   /** true if currently on the bench but eligible */
   isBenched: boolean;
   /** false if banned, injured, etc. (depends on season rules later) */
   canPlay: boolean;
+
+  /**
+   * Ancestor species/forms that may be selected in Team Hub for this drafted Pokémon.
+   * Ordered root → drafted.
+   */
+  usableForms: {
+    pokemonId: number;
+    speciesName: string | null;
+    formName: string | null;
+    dexNumber: number | null;
+  }[];
 };
 
 export type TeamInventoryItem = {
@@ -101,7 +115,11 @@ export type TeamHubOverviewResponse = {
 export type TeamRosterResponse = {
   teamId: number;
   seasonId: number;
-  pokemon: TeamRosterPokemon[];
+  active: TeamRosterPokemon[];
+  bench: TeamRosterPokemon[];
+  maxActive: number;
+  validationStatus: "OK" | "Incomplete" | "Illegal" | string;
+  validationMessages: string[];
 };
 
 export type TeamInventoryResponse = {
@@ -123,17 +141,32 @@ export type TeamMatchesResponse = {
  */
 
 export function mapRosterRowToPokemon(
-  row: TeamRosterRow
+  row: TeamRosterRow,
+  usableForms: TeamRosterPokemon["usableForms"]
 ): TeamRosterPokemon {
   return {
     pokemonInstanceId: row.pokemonInstanceId,
     pokemonId: row.pokemonId,
     speciesName: row.speciesName,
     nickname: row.nickname,
+    spriteUrl: row.spriteUrl,
+    roles: safeParseStringArray(row.rolesJson),
+    baseCost: row.baseCost,
     isActive: false,
     isBenched: true,
-    canPlay: true
+    canPlay: true,
+    usableForms
   };
+}
+
+function safeParseStringArray(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 export function mapItemRowToInventoryItem(

@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { RequireAuthHook } from "../shared/permissions";
 import { toErrorResponse } from "../shared/errors";
 import { draftService } from "../modules/draft/draft.service";
+import { draftRealtime } from "../modules/draft/draft.realtime";
 
 import type {
   DraftLobbyResponse,
@@ -17,7 +18,8 @@ import type {
   DraftResultsResponse,
   DraftTeamResultsResponse,
   DraftExportFormat,
-  AdminForcePickBody
+  AdminForcePickBody,
+  AdminUpdateDraftSettingsBody
 } from "../modules/draft/draft.schemas";
 
 export function registerDraftRoutes(
@@ -25,6 +27,73 @@ export function registerDraftRoutes(
   deps: { requireAuth: RequireAuthHook }
 ) {
   const { requireAuth } = deps;
+
+  // ───────────────────────────
+  // Realtime (SSE + presence)
+  // ───────────────────────────
+
+  // GET /seasons/:seasonId/draft/stream
+  // Server-Sent Events stream for live draft updates.
+  app.get<{ Params: { seasonId: string } }>(
+    "/seasons/:seasonId/draft/stream",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      try {
+        const seasonId = Number(request.params.seasonId);
+        if (!Number.isInteger(seasonId) || seasonId <= 0) {
+          reply.code(400).send({ error: "BadRequest", message: "seasonId must be a positive integer" });
+          return;
+        }
+
+        // Standard SSE headers.
+        reply.raw.statusCode = 200;
+        reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
+        reply.raw.setHeader("Connection", "keep-alive");
+        // Prevent nginx buffering if present.
+        reply.raw.setHeader("X-Accel-Buffering", "no");
+
+        // Keep socket open.
+        // @ts-expect-error Fastify types don't always include this.
+        reply.raw.flushHeaders?.();
+
+        draftRealtime.addSseClient(seasonId, reply.raw);
+
+        // Let Fastify know we are handling the response manually.
+        // @ts-expect-error Fastify reply has hijack in runtime.
+        reply.hijack();
+      } catch (err) {
+        const { statusCode, payload } = toErrorResponse(err);
+        reply.code(statusCode).send(payload);
+      }
+    }
+  );
+
+  // POST /seasons/:seasonId/draft/presence
+  // Heartbeat endpoint. Returns current online userIds.
+  app.post<{ Params: { seasonId: string }; Reply: { onlineUserIds: number[] } }>(
+    "/seasons/:seasonId/draft/presence",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const seasonId = Number(request.params.seasonId);
+        if (!Number.isInteger(seasonId) || seasonId <= 0) {
+          reply.code(400).send({ onlineUserIds: [] });
+          return;
+        }
+
+        const onlineUserIds = draftRealtime.heartbeat(seasonId, user.id);
+        // Presence changes are interesting to clients.
+        draftRealtime.emit(seasonId, "draft:presence", { onlineUserIds });
+
+        reply.send({ onlineUserIds });
+      } catch (err) {
+        const { statusCode, payload } = toErrorResponse(err);
+        reply.code(statusCode).send(payload);
+      }
+    }
+  );
 
   // ───────────────────────────
   // Draft meta / lobby
@@ -60,6 +129,7 @@ export function registerDraftRoutes(
       try {
         const user = request.user!;
         const res = draftService.toggleReady(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:lobby", { kind: "ready" });
         reply.send(res);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
@@ -154,6 +224,7 @@ export function registerDraftRoutes(
           user,
           request.body
         );
+        draftRealtime.emit(Number(request.params.seasonId), "draft:watchlist", { kind: "watchlist" });
         reply.send(list);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
@@ -174,6 +245,7 @@ export function registerDraftRoutes(
       try {
         const user = request.user!;
         const state = draftService.makePick(request.params.seasonId, user, request.body);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "pick" });
         reply.send(state);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
@@ -282,7 +354,53 @@ export function registerDraftRoutes(
   // Commissioner controls
   // ───────────────────────────
 
-  // POST /seasons/:seasonId/draft/admin/start
+  
+
+  // POST /seasons/:seasonId/draft/admin/reroll-order
+  app.post<{
+    Params: { seasonId: string };
+    Reply: DraftLobbyResponse;
+  }>(
+    "/seasons/:seasonId/draft/admin/reroll-order",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const lobby = draftService.adminRerollOrder(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:lobby", { kind: "reroll" });
+        reply.send(lobby);
+      } catch (err) {
+        const { statusCode, payload } = toErrorResponse(err);
+        reply.code(statusCode).send(payload);
+      }
+    }
+  );
+
+  // PATCH /seasons/:seasonId/draft/admin/settings
+  app.patch<{
+    Params: { seasonId: string };
+    Body: AdminUpdateDraftSettingsBody;
+    Reply: DraftLobbyResponse;
+  }>(
+    "/seasons/:seasonId/draft/admin/settings",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const lobby = draftService.adminUpdateDraftSettings(
+          request.params.seasonId,
+          user,
+          request.body ?? {}
+        );
+        draftRealtime.emit(Number(request.params.seasonId), "draft:lobby", { kind: "settings" });
+        reply.send(lobby);
+      } catch (err) {
+        const { statusCode, payload } = toErrorResponse(err);
+        reply.code(statusCode).send(payload);
+      }
+    }
+  );
+// POST /seasons/:seasonId/draft/admin/start
   app.post<{
     Params: { seasonId: string };
     Reply: DraftStateResponse;
@@ -293,6 +411,7 @@ export function registerDraftRoutes(
       try {
         const user = request.user!;
         const state = draftService.adminStartDraft(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "start" });
         reply.send(state);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
@@ -312,6 +431,27 @@ export function registerDraftRoutes(
       try {
         const user = request.user!;
         const state = draftService.adminPauseDraft(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "pause" });
+        reply.send(state);
+      } catch (err) {
+        const { statusCode, payload } = toErrorResponse(err);
+        reply.code(statusCode).send(payload);
+      }
+    }
+  );
+
+  // POST /seasons/:seasonId/draft/admin/resume
+  app.post<{
+    Params: { seasonId: string };
+    Reply: DraftStateResponse;
+  }>(
+    "/seasons/:seasonId/draft/admin/resume",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const state = draftService.adminResumeDraft(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "resume" });
         reply.send(state);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
@@ -331,6 +471,7 @@ export function registerDraftRoutes(
       try {
         const user = request.user!;
         const state = draftService.adminEndDraft(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "end" });
         reply.send(state);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
@@ -355,6 +496,7 @@ export function registerDraftRoutes(
           user,
           request.body
         );
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "forcePick" });
         reply.send(state);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
@@ -374,6 +516,28 @@ export function registerDraftRoutes(
       try {
         const user = request.user!;
         const state = draftService.adminUndoLast(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "undo" });
+        reply.send(state);
+      } catch (err) {
+        const { statusCode, payload } = toErrorResponse(err);
+        reply.code(statusCode).send(payload);
+      }
+    }
+  );
+
+  // POST /seasons/:seasonId/draft/admin/advance
+  // Commissioner utility: auto-pick the next valid Pokémon for the team on the clock.
+  app.post<{
+    Params: { seasonId: string };
+    Reply: DraftStateResponse;
+  }>(
+    "/seasons/:seasonId/draft/admin/advance",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const state = draftService.adminAdvanceDraft(request.params.seasonId, user);
+        draftRealtime.emit(Number(request.params.seasonId), "draft:state", { kind: "advance" });
         reply.send(state);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);

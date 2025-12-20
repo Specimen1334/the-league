@@ -2,6 +2,7 @@
 import type { FastifyInstance } from "fastify";
 import type { RequireSuperAdminHook } from "../shared/permissions";
 import { adminService } from "../modules/admin/admin.service";
+import { importPbsZipToDex } from "../modules/pokedex/pokedexImport.service";
 import {
   normalizeAdminListQuery,
   type AdminListQuery,
@@ -10,7 +11,6 @@ import {
   type AdminUpdateSeasonBody,
   type AdminUpdateTeamBody,
   type AdminUpdateMatchBody,
-  type AdminImportBody,
   type AdminUpdateFeatureFlagBody
 } from "../modules/admin/admin.schemas";
 import { toErrorResponse } from "../shared/errors";
@@ -403,41 +403,28 @@ export function registerAdminRoutes(
   // Importers
   // ───────────────────────────
 
-  app.post<{ Body: AdminImportBody }>(
-    "/admin/import/pokemon",
+  app.post(
+    "/admin/pokedex/import-pbs",
     { preHandler: requireSuperAdmin },
     async (request, reply) => {
       try {
-        const res = adminService.importPokemon(request.body);
-        reply.send(res);
-      } catch (err) {
-        const { statusCode, payload } = toErrorResponse(err);
-        reply.code(statusCode).send(payload);
-      }
-    }
-  );
+        const qs = (request.query ?? {}) as any;
+        // Accept both boolean-ish strings and 1/0 from query params
+        const dryRunRaw = String(qs.dryRun ?? "false").toLowerCase();
+        const dryRun = dryRunRaw === "true" || dryRunRaw === "1";
+        const sourceTag = typeof qs.sourceTag === "string" && qs.sourceTag.trim().length > 0
+          ? qs.sourceTag.trim()
+          : "pbs";
 
-  app.post<{ Body: AdminImportBody }>(
-    "/admin/import/moves",
-    { preHandler: requireSuperAdmin },
-    async (request, reply) => {
-      try {
-        const res = adminService.importMoves(request.body);
-        reply.send(res);
-      } catch (err) {
-        const { statusCode, payload } = toErrorResponse(err);
-        reply.code(statusCode).send(payload);
-      }
-    }
-  );
+        const file = await (request as any).file();
+        if (!file) {
+          reply.code(400).send({ error: "BadRequest", message: "Missing file upload" });
+          return;
+        }
 
-  app.post<{ Body: AdminImportBody }>(
-    "/admin/import/points",
-    { preHandler: requireSuperAdmin },
-    async (request, reply) => {
-      try {
-        const res = adminService.importPoints(request.body);
-        reply.send(res);
+        const buf = await file.toBuffer();
+        const report = importPbsZipToDex({ buffer: buf, dryRun, sourceTag });
+        reply.send(report);
       } catch (err) {
         const { statusCode, payload } = toErrorResponse(err);
         reply.code(statusCode).send(payload);

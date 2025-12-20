@@ -51,6 +51,7 @@ const DEFAULT_SETTINGS: SeasonSettings = {
   pickTimerSeconds: 90,
   roundCount: 11,
   draftType: "Snake",
+  draftPointCap: 0,
   allowTrades: true,
   tradeDeadlineAt: null
 };

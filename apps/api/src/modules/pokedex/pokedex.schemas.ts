@@ -47,9 +47,15 @@ export type PokedexBrowseQuery = {
   role?: string;
   minCost?: number;
   maxCost?: number;
+  /**
+   * When true, restrict to Pokémon that are draftable by definition.
+   * Per league rules: draftable iff base_cost is present.
+   */
+  draftableOnly?: boolean;
   leagueId?: number;
   seasonId?: number;
-  sortBy?: "name" | "cost";
+  sortBy?: "name" | "cost_low" | "cost_high" | "bst_high";
+  legality?: "all" | "allowed" | "banned";
   page?: number;
   limit?: number;
 };
@@ -66,6 +72,8 @@ export type PokedexBrowseItem = {
   baseCost: number | null;
   effectiveCost: number | null;
   isBanned: boolean;
+
+  bst: number | null;
 };
 
 export type PokedexBrowseResponse = {

@@ -14,6 +14,10 @@ const nextConfig = {
 
     return [
       {
+        source: "/assets/pokemon/:path*",
+        destination: `${BACKEND_ORIGIN}/assets/pokemon/:path*`
+      },
+      {
         source: "/api/:path*",
         destination: `${BACKEND_ORIGIN}/:path*`
       }

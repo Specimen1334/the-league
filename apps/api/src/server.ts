@@ -1,7 +1,10 @@
 // apps/api/src/server.ts
+import path from "node:path";
 import fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
+import staticPlugin from "@fastify/static";
 
 import { registerAuthRoutes } from "./routes/auth";
 import { registerUserRoutes } from "./routes/users";
@@ -44,7 +47,24 @@ export async function buildServer(): Promise<FastifyInstance> {
     origin: true,        // echo back the request origin
     credentials: true    // allow cookies / Authorization headers
   });
-  
+
+  // Multipart uploads (PBS zip import, etc.)
+  await app.register(multipart, {
+    limits: {
+      fileSize: 50 * 1024 * 1024 // 50MB
+    }
+  });
+
+  // Static assets: Pokémon sprites served by API
+  // Folder lives at apps/images/pokemon
+  // At runtime, __dirname resolves to apps/api/dist (after build) or apps/api/src (dev).
+  // This relative path works in both cases.
+  await app.register(staticPlugin, {
+    root: path.resolve(__dirname, "../../images/pokemon"),
+    prefix: "/assets/pokemon/",
+    decorateReply: false
+  });
+
   // Global hook: hydrate request.user from session cookie if present
   app.addHook("preHandler", async (request, _reply) => {
     const sessionId = request.cookies?.[SESSION_COOKIE_NAME];

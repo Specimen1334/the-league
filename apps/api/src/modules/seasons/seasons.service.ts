@@ -383,6 +383,14 @@ export const seasonsService = {
       }
     }
 
+    if (patch.draftPointCap !== undefined) {
+      if (!Number.isInteger(patch.draftPointCap) || patch.draftPointCap < 0 || patch.draftPointCap > 10000) {
+        const err = new Error("draftPointCap must be a non-negative integer (0 = unlimited)");
+        (err as any).statusCode = 400;
+        throw err;
+      }
+    }
+
     if (patch.tradeDeadlineAt !== undefined) {
       patch.tradeDeadlineAt = parseOptionalIsoDate("tradeDeadlineAt", patch.tradeDeadlineAt);
     }

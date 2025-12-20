@@ -109,23 +109,6 @@ export type AdminUpdateMatchBody = {
 };
 
 /**
- * Admin: body for import operations, e.g.:
- * - POST /admin/import/pokemon
- * - POST /admin/import/moves
- * - POST /admin/import/points
- *
- * For now this supports:
- * - dryRun: validate without writing
- * - sourceTag: optional label for where the data came from
- * Actual file/stream payloads will be handled via multipart
- * in the route layer when needed.
- */
-export type AdminImportBody = {
-  dryRun?: boolean;
-  sourceTag?: string | null;
-};
-
-/**
  * Admin Danger Zone actions require explicit confirmation.
  * This maps to endpoints like:
  * - POST /admin/danger/delete-league

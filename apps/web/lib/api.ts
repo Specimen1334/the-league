@@ -46,8 +46,9 @@ export async function apiFetchJson<T>(
   }
 
   if (!res.ok) {
+    // Prefer the human-readable message; fall back to error code/name.
     const message =
-      body?.error || body?.message || `Request failed with status ${res.status}`;
+      body?.message || body?.error || `Request failed with status ${res.status}`;
     throw new ApiError(res.status, message, body);
   }
 

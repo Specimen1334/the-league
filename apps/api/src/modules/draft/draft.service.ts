@@ -4,6 +4,7 @@ import { seasonsRepo } from "../seasons/seasons.repo";
 import { teamsRepo } from "../teams/teams.repo";
 import { pokedexRepo } from "../pokedex/pokedex.repo";
 import { draftRepo } from "./draft.repo";
+import type { DraftSessionRow } from "./draft.repo";
 import { getLeagueRoleOrNull, assertLeagueRole } from "../../shared/permissions";
 
 import type {
@@ -18,6 +19,7 @@ import type {
   DraftTeamResultsResponse,
   DraftExportFormat,
   AdminForcePickBody,
+  AdminUpdateDraftSettingsBody,
   DraftStateResponse,
   DraftPickBody,
   DraftStatus,
@@ -42,12 +44,33 @@ function normalisePoolQuery(
 ): Required<Pick<DraftPoolQuery, "page" | "limit">> &
   Omit<DraftPoolQuery, "page" | "limit"> {
   const page = Math.max(1, Number(raw.page) || 1);
-  const limit = Math.min(100, Math.max(1, Number(raw.limit) || 50));
+  // Draft rooms frequently need large, client-side sortable lists.
+  // Keep a hard upper bound to protect the server.
+  const limit = Math.min(1000, Math.max(1, Number(raw.limit) || 50));
   return {
     ...raw,
     page,
     limit
   };
+}
+
+function safeParseBaseStats(
+  json: string | null | undefined
+): { hp: number; atk: number; def: number; spa: number; spd: number; spe: number } | null {
+  if (!json) return null;
+  try {
+    const obj = JSON.parse(json) as Record<string, unknown>;
+    const hp = Number(obj.hp);
+    const atk = Number(obj.atk);
+    const def = Number(obj.def);
+    const spa = Number(obj.spa);
+    const spd = Number(obj.spd);
+    const spe = Number(obj.spe);
+    if ([hp, atk, def, spa, spd, spe].some((n) => !Number.isFinite(n))) return null;
+    return { hp, atk, def, spa, spd, spe };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -120,7 +143,7 @@ export const draftService = {
     // Ensure participants exist – one per team in this season.
     const teams = teamsRepo.listSeasonTeams(seasonId);
     const teamIds = teams.map((t) => t.id);
-    const participants = draftRepo.seedParticipantsIfEmpty(seasonId, teamIds);
+    const participants = draftRepo.ensureParticipants(seasonId, teamIds);
 
     const youTeam = teamsRepo.getTeamBySeasonAndUser(seasonId, user.id);
 
@@ -175,7 +198,7 @@ export const draftService = {
     // Ensure participants exist
     const teams = teamsRepo.listSeasonTeams(seasonId);
     const teamIds = teams.map((t) => t.id);
-    draftRepo.seedParticipantsIfEmpty(seasonId, teamIds);
+    draftRepo.ensureParticipants(seasonId, teamIds);
 
     const participants = draftRepo.listParticipants(seasonId);
     const yourRow = participants.find((p) => p.teamId === youTeam.id);
@@ -202,7 +225,7 @@ export const draftService = {
 
     const session = draftRepo.ensureSession(seasonId);
     const teams = teamsRepo.listSeasonTeams(seasonId);
-    const participants = draftRepo.seedParticipantsIfEmpty(
+    const participants = draftRepo.ensureParticipants(
       seasonId,
       teams.map((t) => t.id)
     );
@@ -250,15 +273,20 @@ export const draftService = {
           }
         : null;
 
-    const pickViews = picks.map((p) => ({
-      id: p.id,
-      round: p.round,
-      pickInRound: p.pickInRound,
-      overallPickNumber: p.overallPickNumber,
-      teamId: p.teamId,
-      teamName: teamNames.get(p.teamId) ?? null,
-      pokemonId: p.pokemonId
-    }));
+    const pickViews = picks.map((p) => {
+      const entry = pokedexRepo.getEntryById(p.pokemonId);
+      return {
+        id: p.id,
+        round: p.round,
+        pickInRound: p.pickInRound,
+        overallPickNumber: p.overallPickNumber,
+        teamId: p.teamId,
+        teamName: teamNames.get(p.teamId) ?? null,
+        pokemonId: p.pokemonId,
+        pokemonName: entry?.name ?? null,
+        spriteUrl: entry?.spriteUrl ?? null
+      };
+    });
 
     return {
       seasonId,
@@ -310,6 +338,8 @@ export const draftService = {
       role: query.role,
       minCost: undefined,
       maxCost: undefined,
+      draftableOnly: true,
+      legality: "allowed",
       leagueId: season.leagueId ?? undefined,
       seasonId: seasonId,
       sortBy: "name"
@@ -330,10 +360,13 @@ export const draftService = {
 
         return {
           pokemonId,
+          dexNumber: typeof row.dex_number === "number" ? row.dex_number : null,
           name: row.name,
+          spriteUrl: row.sprite_url ?? null,
+          baseStats: safeParseBaseStats(row.base_stats_json),
           types,
           roles,
-          baseCost: row.base_cost ?? null,
+          baseCost: row.override_cost ?? row.base_cost ?? null,
           isPicked,
           pickedByTeamId
         };
@@ -380,6 +413,28 @@ export const draftService = {
         pokemonId: p.pokemonId
       }));
 
+    const roster = picks
+      .map((p) => {
+        const entry = pokedexRepo.getEntryById(p.pokemonId);
+        if (!entry) return null;
+        const ctx = pokedexRepo.getSeasonContext(
+          entry.pokemonId,
+          season.leagueId ?? undefined,
+          seasonId
+        );
+        return {
+          pokemonId: entry.pokemonId,
+          dexNumber: entry.dexNumber ?? null,
+          name: entry.name,
+          spriteUrl: entry.spriteUrl ?? null,
+          baseStats: entry.baseStats ?? null,
+          types: entry.types ?? [],
+          roles: entry.roles ?? [],
+          baseCost: ctx?.effectiveCost ?? entry.baseCost ?? null
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
     const watchlistPokemonIds = draftRepo.listWatchlist(seasonId, youTeam.id);
 
     return {
@@ -387,6 +442,7 @@ export const draftService = {
       teamId: youTeam.id,
       teamName: youTeam.name,
       picks,
+      roster,
       watchlistPokemonIds
     };
   },
@@ -458,19 +514,11 @@ export const draftService = {
       throw err;
     }
 
-    const session = draftRepo.ensureSession(seasonId);
-    if (session.status !== "InProgress") {
-      const err = new Error("Draft is not currently in progress");
-      (err as any).statusCode = 409;
-      throw err;
-    }
-
     const teams = teamsRepo.listSeasonTeams(seasonId);
-    const participants = draftRepo.seedParticipantsIfEmpty(
+    draftRepo.ensureParticipants(
       seasonId,
       teams.map((t) => t.id)
     );
-    const picks = draftRepo.listPicks(seasonId);
 
     const youTeam = teamsRepo.getTeamBySeasonAndUser(seasonId, user.id);
 
@@ -485,19 +533,22 @@ export const draftService = {
       throw err;
     }
 
-    // Check if this Pokémon is already drafted.
-    const alreadyPicked = picks.some((p) => p.pokemonId === pokemonId);
-    if (alreadyPicked) {
-      const err = new Error("This Pokémon has already been drafted");
-      (err as any).statusCode = 409;
-      throw err;
-    }
+    // Cache names for actionable error messages.
+    const teamNameById = new Map<number, string>();
+    for (const t of teams) teamNameById.set(t.id, t.name);
 
     // Ensure Pokémon exists and is not banned in this season context.
     const entry = pokedexRepo.getEntryById(pokemonId);
     if (!entry) {
       const err = new Error("Pokémon not found");
       (err as any).statusCode = 404;
+      throw err;
+    }
+
+    // Draftable by definition iff base_cost is present.
+    if (entry.baseCost == null) {
+      const err = new Error("This Pokémon is not draftable");
+      (err as any).statusCode = 409;
       throw err;
     }
 
@@ -512,30 +563,62 @@ export const draftService = {
       throw err;
     }
 
-    // Determine who is on the clock.
-    const orderedParticipants = participants
-      .map((p) => ({ teamId: p.teamId, position: p.position }))
-      .sort((a, b) => a.position - b.position);
-
-    const state = computeTeamOnClock(session.type, orderedParticipants, picks.length);
-    const expectedTeamId = state.teamId;
-
-    if (!isCommissioner) {
-      if (!youTeam || youTeam.id !== expectedTeamId) {
-        const err = new Error("It is not your turn to pick");
-        (err as any).statusCode = 403;
+    // ✅ Draft integrity: do all turn + availability checks and the insert inside
+    // a single transaction so multi-tab spam / races cannot create duplicates.
+    draftRepo.transaction(() => {
+      const session = draftRepo.ensureSession(seasonId);
+      if (session.status !== "InProgress") {
+        const err = new Error(
+          session.status === "Paused" ? "Draft is paused" : "Draft is not currently in progress"
+        );
+        (err as any).statusCode = 409;
         throw err;
       }
-    }
 
-    // Insert pick.
-    draftRepo.insertPick({
-      seasonId,
-      round: state.currentRound,
-      pickInRound: state.currentPickInRound,
-      overallPickNumber: state.overallPickNumber,
-      teamId: expectedTeamId,
-      pokemonId
+      const participants = draftRepo.listParticipants(seasonId);
+      const picks = draftRepo.listPicks(seasonId);
+
+      if (picks.some((p) => p.pokemonId === pokemonId)) {
+        const err = new Error("This Pokémon has already been drafted");
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      const orderedParticipants = participants
+        .map((p) => ({ teamId: p.teamId, position: p.position }))
+        .sort((a, b) => a.position - b.position);
+
+      const clock = computeTeamOnClock(session.type, orderedParticipants, picks.length);
+      const expectedTeamId = clock.teamId;
+
+      if (!isCommissioner) {
+        if (!youTeam || youTeam.id !== expectedTeamId) {
+          const expectedName = teamNameById.get(expectedTeamId) ?? `Team #${expectedTeamId}`;
+          const err = new Error(`Not your turn to pick. Currently picking: ${expectedName}.`);
+          (err as any).statusCode = 403;
+          throw err;
+        }
+      }
+
+      try {
+        draftRepo.insertPick({
+          seasonId,
+          round: clock.currentRound,
+          pickInRound: clock.currentPickInRound,
+          overallPickNumber: clock.overallPickNumber,
+          teamId: expectedTeamId,
+          pokemonId
+        });
+      } catch (e: any) {
+        // Unique indexes added in schema will throw if the pokemon/overall pick is duplicated.
+        const msg = String(e?.message ?? "");
+        if (msg.includes("idx_draft_picks_season_pokemon") || msg.includes("UNIQUE")) {
+          const err = new Error("This Pokémon was just drafted by another team");
+          (err as any).statusCode = 409;
+          throw err;
+        }
+        throw e;
+      }
     });
 
     // Return updated state.
@@ -561,7 +644,7 @@ export const draftService = {
 
     const session = draftRepo.ensureSession(seasonId);
     const teams = teamsRepo.listSeasonTeams(seasonId);
-    const participants = draftRepo.seedParticipantsIfEmpty(
+    const participants = draftRepo.ensureParticipants(
       seasonId,
       teams.map((t) => t.id)
     );
@@ -709,11 +792,180 @@ export const draftService = {
   /**
    * Admin controls – start/pause/resume/undo/advance
    */
+  
+  adminRerollOrder(seasonIdParam: string, user: AppUser): DraftLobbyResponse {
+    const seasonId = assertPositiveInt("seasonId", seasonIdParam);
+    this.assertCommissionerForSeason(seasonId, user);
+
+    const session = draftRepo.ensureSession(seasonId);
+    if (session.status !== "NotStarted" && session.status !== "Lobby") {
+      const err = new Error("Draft order can only be rerolled before the draft starts");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    const picks = draftRepo.listPicks(seasonId);
+    if (picks.length > 0) {
+      const err = new Error("Cannot reroll draft order after picks have been made");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    const teams = teamsRepo.listSeasonTeams(seasonId);
+    const participants = draftRepo.ensureParticipants(
+      seasonId,
+      teams.map((t) => t.id)
+    );
+
+    // Fisher–Yates shuffle of teamIds
+    const shuffled = participants.map((p) => p.teamId);
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = shuffled[i];
+      shuffled[i] = shuffled[j];
+      shuffled[j] = tmp;
+    }
+
+    draftRepo.setParticipantPositions(
+      seasonId,
+      shuffled.map((teamId, idx) => ({ teamId, position: idx + 1 }))
+    );
+
+    return this.getLobby(seasonIdParam, user);
+  },
+
+  adminUpdateDraftSettings(
+    seasonIdParam: string,
+    user: AppUser,
+    body: AdminUpdateDraftSettingsBody
+  ): DraftLobbyResponse {
+    const seasonId = assertPositiveInt("seasonId", seasonIdParam);
+    this.assertCommissionerForSeason(seasonId, user);
+
+    const season = seasonsRepo.getSeasonById(seasonId);
+    if (!season) {
+      const err = new Error("Season not found");
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const session = draftRepo.ensureSession(seasonId);
+    if (session.status !== "NotStarted" && session.status !== "Lobby") {
+      const err = new Error("Draft settings can only be changed before the draft starts");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    const picks = draftRepo.listPicks(seasonId);
+    if (picks.length > 0) {
+      const err = new Error("Draft settings cannot be changed after picks have been made");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    const patch: Partial<Pick<DraftSessionRow, "type" | "startsAt" | "pickTimerSeconds" | "roundCount">> = {};
+
+    if (body?.type !== undefined) {
+      if (body.type !== "Snake" && body.type !== "Linear" && body.type !== "Custom") {
+        const err = new Error("Invalid draft type");
+        (err as any).statusCode = 400;
+        throw err;
+      }
+      patch.type = body.type;
+    }
+
+    if (body?.startsAt !== undefined) {
+      if (body.startsAt !== null) {
+        const d = new Date(body.startsAt);
+        if (Number.isNaN(d.getTime())) {
+          const err = new Error("startsAt must be a valid ISO 8601 date-time or null");
+          (err as any).statusCode = 400;
+          throw err;
+        }
+      }
+      patch.startsAt = body.startsAt ?? null;
+    }
+
+    if (body?.pickTimerSeconds !== undefined) {
+      if (body.pickTimerSeconds !== null) {
+        const n = Number(body.pickTimerSeconds);
+        if (!Number.isInteger(n) || n < 5 || n > 3600) {
+          const err = new Error("pickTimerSeconds must be an integer between 5 and 3600, or null");
+          (err as any).statusCode = 400;
+          throw err;
+        }
+        patch.pickTimerSeconds = n;
+      } else {
+        patch.pickTimerSeconds = null;
+      }
+    }
+
+    if (body?.roundCount !== undefined) {
+      if (body.roundCount !== null) {
+        const n = Number(body.roundCount);
+        if (!Number.isInteger(n) || n < 1 || n > 50) {
+          const err = new Error("roundCount must be an integer between 1 and 50, or null");
+          (err as any).statusCode = 400;
+          throw err;
+        }
+        patch.roundCount = n;
+      } else {
+        patch.roundCount = null;
+      }
+    }
+
+    const updated = draftRepo.updateSession(seasonId, patch);
+    if (!updated) {
+      const err = new Error("Draft session not found");
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    // Keep season-scoped settings in sync where they overlap.
+    const seasonSettingsPatch: any = {};
+    if (patch.pickTimerSeconds !== undefined && patch.pickTimerSeconds !== null) {
+      seasonSettingsPatch.pickTimerSeconds = patch.pickTimerSeconds;
+    }
+    if (patch.roundCount !== undefined && patch.roundCount !== null) {
+      seasonSettingsPatch.roundCount = patch.roundCount;
+    }
+    if (patch.type !== undefined && (patch.type === "Snake" || patch.type === "Linear")) {
+      seasonSettingsPatch.draftType = patch.type;
+    }
+    if (Object.keys(seasonSettingsPatch).length > 0) {
+      seasonsRepo.updateSeasonSettings(seasonId, seasonSettingsPatch);
+    }
+
+    return this.getLobby(seasonIdParam, user);
+  },
+
   adminStartDraft(seasonIdParam: string, user: AppUser): DraftStateResponse {
     const seasonId = assertPositiveInt("seasonId", seasonIdParam);
     this.assertCommissionerForSeason(seasonId, user);
 
-    draftRepo.ensureSession(seasonId);
+    const season = seasonsRepo.getSeasonById(seasonId);
+    if (!season) {
+      const err = new Error("Season not found");
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const session = draftRepo.ensureSession(seasonId);
+    if (session.status !== "NotStarted" && session.status !== "Lobby") {
+      const err = new Error("Draft cannot be started from the current state");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    // Ensure participant list exists before starting.
+    const teams = teamsRepo.listSeasonTeams(seasonId);
+    draftRepo.ensureParticipants(seasonId, teams.map((t) => t.id));
+
+    // Season lifecycle: Signup → Drafting when the draft starts.
+    if (season.status === "Signup") {
+      seasonsRepo.updateSeason(seasonId, { status: "Drafting" });
+    }
+
     draftRepo.updateSession(seasonId, { status: "InProgress" as DraftStatus });
     return this.getState(seasonIdParam, user);
   },
@@ -727,11 +979,43 @@ export const draftService = {
     return this.getState(seasonIdParam, user);
   },
 
+  adminResumeDraft(seasonIdParam: string, user: AppUser): DraftStateResponse {
+    const seasonId = assertPositiveInt("seasonId", seasonIdParam);
+    this.assertCommissionerForSeason(seasonId, user);
+
+    const session = draftRepo.ensureSession(seasonId);
+    if (session.status !== "Paused") {
+      const err = new Error("Draft is not paused");
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    draftRepo.updateSession(seasonId, { status: "InProgress" as DraftStatus });
+    return this.getState(seasonIdParam, user);
+  },
+
   adminEndDraft(seasonIdParam: string, user: AppUser): DraftStateResponse {
     const seasonId = assertPositiveInt("seasonId", seasonIdParam);
     this.assertCommissionerForSeason(seasonId, user);
-    draftRepo.ensureSession(seasonId);
+
+    const season = seasonsRepo.getSeasonById(seasonId);
+    if (!season) {
+      const err = new Error("Season not found");
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const session = draftRepo.ensureSession(seasonId);
+    if (session.status === "Completed") {
+      return this.getState(seasonIdParam, user);
+    }
+
     draftRepo.updateSession(seasonId, { status: "Completed" as DraftStatus });
+
+    // Season lifecycle: Drafting → Active when the draft completes.
+    if (season.status === "Drafting" || season.status === "Signup") {
+      seasonsRepo.updateSeason(seasonId, { status: "Active" });
+    }
     return this.getState(seasonIdParam, user);
   },
 
@@ -757,12 +1041,7 @@ export const draftService = {
     const seasonId = assertPositiveInt("seasonId", seasonIdParam);
     this.assertCommissionerForSeason(seasonId, user);
 
-    const session = draftRepo.ensureSession(seasonId);
-    if (session.status !== "InProgress") {
-      const err = new Error("Draft is not currently in progress");
-      (err as any).statusCode = 409;
-      throw err;
-    }
+    // Do the full turn + availability check inside a transaction.
 
     const pokemonId = assertPositiveInt("pokemonId", body?.pokemonId);
 
@@ -773,35 +1052,7 @@ export const draftService = {
       throw err;
     }
 
-    const teams = teamsRepo.listSeasonTeams(seasonId);
-    const participants = draftRepo.seedParticipantsIfEmpty(
-      seasonId,
-      teams.map((t) => t.id)
-    );
-    const picks = draftRepo.listPicks(seasonId);
-
-    // Determine who is on the clock.
-    const orderedParticipants = participants
-      .map((p) => ({ teamId: p.teamId, position: p.position }))
-      .sort((a, b) => a.position - b.position);
-    const clock = computeTeamOnClock(session.type, orderedParticipants, picks.length);
-    const expectedTeamId = clock.teamId;
-
-    if (body?.teamId != null) {
-      const forcedTeamId = assertPositiveInt("teamId", body.teamId);
-      if (forcedTeamId !== expectedTeamId) {
-        const err = new Error("teamId does not match the team currently on the clock");
-        (err as any).statusCode = 409;
-        throw err;
-      }
-    }
-
-    // Validate availability
-    if (picks.some((p) => p.pokemonId === pokemonId)) {
-      const err = new Error("This Pokémon has already been drafted");
-      (err as any).statusCode = 409;
-      throw err;
-    }
+    // Validate pokemon outside tx (cheap), but recheck "already drafted" inside tx.
     const entry = pokedexRepo.getEntryById(pokemonId);
     if (!entry) {
       const err = new Error("Pokémon not found");
@@ -819,13 +1070,61 @@ export const draftService = {
       throw err;
     }
 
-    draftRepo.insertPick({
-      seasonId,
-      round: clock.currentRound,
-      pickInRound: clock.currentPickInRound,
-      overallPickNumber: clock.overallPickNumber,
-      teamId: expectedTeamId,
-      pokemonId
+    draftRepo.transaction(() => {
+      const session = draftRepo.ensureSession(seasonId);
+      if (session.status !== "InProgress") {
+        const err = new Error(
+          session.status === "Paused" ? "Draft is paused" : "Draft is not currently in progress"
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      const teams = teamsRepo.listSeasonTeams(seasonId);
+      draftRepo.ensureParticipants(seasonId, teams.map((t) => t.id));
+
+      const participants = draftRepo.listParticipants(seasonId);
+      const picks = draftRepo.listPicks(seasonId);
+
+      const orderedParticipants = participants
+        .map((p) => ({ teamId: p.teamId, position: p.position }))
+        .sort((a, b) => a.position - b.position);
+      const clock = computeTeamOnClock(session.type, orderedParticipants, picks.length);
+      const expectedTeamId = clock.teamId;
+
+      if (body?.teamId != null) {
+        const forcedTeamId = assertPositiveInt("teamId", body.teamId);
+        if (forcedTeamId !== expectedTeamId) {
+          const err = new Error("teamId does not match the team currently on the clock");
+          (err as any).statusCode = 409;
+          throw err;
+        }
+      }
+
+      if (picks.some((p) => p.pokemonId === pokemonId)) {
+        const err = new Error("This Pokémon has already been drafted");
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      try {
+        draftRepo.insertPick({
+        seasonId,
+        round: clock.currentRound,
+        pickInRound: clock.currentPickInRound,
+        overallPickNumber: clock.overallPickNumber,
+        teamId: expectedTeamId,
+        pokemonId
+        });
+      } catch (e: any) {
+        const msg = String(e?.message ?? "");
+        if (msg.includes("idx_draft_picks_season_pokemon") || msg.includes("UNIQUE")) {
+          const err = new Error("This Pokémon was just drafted by another team");
+          (err as any).statusCode = 409;
+          throw err;
+        }
+        throw e;
+      }
     });
 
     return this.getState(seasonIdParam, user);
@@ -846,79 +1145,88 @@ export const draftService = {
       throw err;
     }
 
-    const session = draftRepo.ensureSession(seasonId);
-    if (session.status !== "InProgress") {
-      const err = new Error("Draft is not currently in progress");
-      (err as any).statusCode = 409;
-      throw err;
-    }
-
-    const teams = teamsRepo.listSeasonTeams(seasonId);
-    const participants = draftRepo.seedParticipantsIfEmpty(
-      seasonId,
-      teams.map((t) => t.id)
-    );
-
-    const picks = draftRepo.listPicks(seasonId);
-    const picked = new Set<number>(picks.map((p) => p.pokemonId));
-
-    const orderedParticipants = participants
-      .map((p) => ({ teamId: p.teamId, position: p.position }))
-      .sort((a, b) => a.position - b.position);
-
-    const state = computeTeamOnClock(session.type, orderedParticipants, picks.length);
-    const expectedTeamId = state.teamId;
-
-    // Find the first available, not-banned Pokémon.
-    // We use browseEntries and walk pages until we find one (bounded to stay sane).
-    let chosenPokemonId: number | null = null;
-
-    const maxPagesToScan = 20;
-    const pageSize = 100;
-
-    for (let page = 1; page <= maxPagesToScan && chosenPokemonId == null; page++) {
-      const { rows } = pokedexRepo.browseEntries({
-        page,
-        limit: pageSize,
-        search: undefined,
-        type: undefined,
-        role: undefined,
-        minCost: undefined,
-        maxCost: undefined,
-        leagueId: season.leagueId ?? undefined,
-        seasonId: seasonId,
-        sortBy: "name"
-      });
-
-      for (const row of rows) {
-        const pid = row.id;
-        if (picked.has(pid)) continue;
-
-        const seasonCtx = pokedexRepo.getSeasonContext(
-          pid,
-          season.leagueId ?? undefined,
-          seasonId
+    draftRepo.transaction(() => {
+      const session = draftRepo.ensureSession(seasonId);
+      if (session.status !== "InProgress") {
+        const err = new Error(
+          session.status === "Paused" ? "Draft is paused" : "Draft is not currently in progress"
         );
-        if (seasonCtx && seasonCtx.isBanned) continue;
-
-        chosenPokemonId = pid;
-        break;
+        (err as any).statusCode = 409;
+        throw err;
       }
-    }
 
-    if (chosenPokemonId == null) {
-      const err = new Error("No available Pokémon remain to auto-pick");
-      (err as any).statusCode = 409;
-      throw err;
-    }
+      const teams = teamsRepo.listSeasonTeams(seasonId);
+      const participants = draftRepo.ensureParticipants(
+        seasonId,
+        teams.map((t) => t.id)
+      );
 
-    draftRepo.insertPick({
-      seasonId,
-      round: state.currentRound,
-      pickInRound: state.currentPickInRound,
-      overallPickNumber: state.overallPickNumber,
-      teamId: expectedTeamId,
-      pokemonId: chosenPokemonId
+      const picks = draftRepo.listPicks(seasonId);
+      const picked = new Set<number>(picks.map((p) => p.pokemonId));
+
+      const orderedParticipants = participants
+        .map((p) => ({ teamId: p.teamId, position: p.position }))
+        .sort((a, b) => a.position - b.position);
+      const clock = computeTeamOnClock(session.type, orderedParticipants, picks.length);
+      const expectedTeamId = clock.teamId;
+
+      // Find the first available, not-banned Pokémon.
+      let chosenPokemonId: number | null = null;
+      const maxPagesToScan = 20;
+      const pageSize = 100;
+
+      for (let page = 1; page <= maxPagesToScan && chosenPokemonId == null; page++) {
+        const { rows } = pokedexRepo.browseEntries({
+          page,
+          limit: pageSize,
+          search: undefined,
+          type: undefined,
+          role: undefined,
+          minCost: undefined,
+          maxCost: undefined,
+          leagueId: season.leagueId ?? undefined,
+          seasonId: seasonId,
+          sortBy: "name"
+        });
+
+        for (const row of rows) {
+          const pid = row.id;
+          if (picked.has(pid)) continue;
+          const seasonCtx = pokedexRepo.getSeasonContext(
+            pid,
+            season.leagueId ?? undefined,
+            seasonId
+          );
+          if (seasonCtx && seasonCtx.isBanned) continue;
+          chosenPokemonId = pid;
+          break;
+        }
+      }
+
+      if (chosenPokemonId == null) {
+        const err = new Error("No available Pokémon remain to auto-pick");
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      try {
+        draftRepo.insertPick({
+          seasonId,
+          round: clock.currentRound,
+          pickInRound: clock.currentPickInRound,
+          overallPickNumber: clock.overallPickNumber,
+          teamId: expectedTeamId,
+          pokemonId: chosenPokemonId
+        });
+      } catch (e: any) {
+        const msg = String(e?.message ?? "");
+        if (msg.includes("idx_draft_picks_season_pokemon") || msg.includes("UNIQUE")) {
+          const err = new Error("That Pokémon was just drafted by another team");
+          (err as any).statusCode = 409;
+          throw err;
+        }
+        throw e;
+      }
     });
 
     return this.getState(seasonIdParam, user);

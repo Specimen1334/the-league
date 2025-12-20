@@ -48,12 +48,27 @@ export function toErrorResponse(err: unknown): {
     };
   }
 
+  // Back-compat: many services throw a plain Error and attach a numeric statusCode.
+  // Respect it so callers don't get forced into 500s.
   if (err instanceof Error) {
+    const anyErr = err as any;
+    const statusCode =
+      typeof anyErr.statusCode === "number" && Number.isFinite(anyErr.statusCode)
+        ? anyErr.statusCode
+        : 500;
+    const errorName =
+      typeof anyErr.error === "string" && anyErr.error.trim().length > 0
+        ? anyErr.error
+        : statusCode >= 500
+          ? "InternalServerError"
+          : "Error";
+
     return {
-      statusCode: 500,
+      statusCode,
       payload: {
-        error: "InternalServerError",
-        message: err.message || "Internal server error"
+        error: errorName,
+        message: err.message || (statusCode >= 500 ? "Internal server error" : "Error"),
+        ...(anyErr.details ? { details: anyErr.details } : {})
       }
     };
   }

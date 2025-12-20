@@ -77,6 +77,8 @@ export type DraftStateResponse = {
     teamId: number;
     teamName: string | null;
     pokemonId: number;
+    pokemonName: string | null;
+    spriteUrl: string | null;
   }[];
 };
 
@@ -97,13 +99,28 @@ export type DraftPoolQuery = {
  */
 export type DraftPoolItem = {
   pokemonId: number;
+  dexNumber: number | null;
   name: string;
+  spriteUrl: string | null;
+  baseStats: {
+    hp: number;
+    atk: number;
+    def: number;
+    spa: number;
+    spd: number;
+    spe: number;
+  } | null;
   types: string[];
   roles: string[];
   baseCost: number | null;
   isPicked: boolean;
   pickedByTeamId: number | null;
 };
+
+export type DraftPokemonDetails = Pick<
+  DraftPoolItem,
+  "pokemonId" | "dexNumber" | "name" | "spriteUrl" | "baseStats" | "types" | "roles" | "baseCost"
+>;
 
 /**
  * Response for GET /seasons/:seasonId/draft/pool
@@ -136,6 +153,7 @@ export type MyDraftResponse = {
     overallPickNumber: number;
     pokemonId: number;
   }[];
+  roster: DraftPokemonDetails[];
   watchlistPokemonIds: number[];
 };
 
@@ -185,4 +203,22 @@ export type DraftTeamResultsResponse = {
 export type AdminForcePickBody = {
   pokemonId: number;
   teamId?: number;
+};
+
+/**
+ * PATCH /seasons/:seasonId/draft/admin/settings
+ * Commissioner-only configuration updates.
+ */
+export type AdminUpdateDraftSettingsBody = {
+  /** Draft format used by the session. */
+  type?: DraftType;
+
+  /** Optional scheduled start time (ISO 8601) */
+  startsAt?: string | null;
+
+  /** Per-pick timer (seconds). Set null to disable timers. */
+  pickTimerSeconds?: number | null;
+
+  /** Number of rounds to draft. */
+  roundCount?: number | null;
 };

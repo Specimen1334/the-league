@@ -132,6 +132,12 @@ const updateParticipantReadyStmt = dbFile.prepare<
   WHERE season_id = ? AND team_id = ?
 `);
 
+const updateParticipantPositionStmt = dbFile.prepare<[number, number, number]>(`
+  UPDATE draft_participants
+  SET position = ?
+  WHERE season_id = ? AND team_id = ?
+`);
+
 const listPicksStmt = dbFile.prepare<[number]>(`
   SELECT
     id,
@@ -208,7 +214,28 @@ const insertWatchlistStmt = dbFile.prepare<[number, number, number]>(`
   VALUES (?, ?, ?)
 `);
 
+const sumTeamDraftPointsStmt = dbFile.prepare<[number, number]>(`
+  SELECT
+    COALESCE(SUM(COALESCE(o.override_cost, e.override_cost, e.base_cost)), 0) AS points
+  FROM draft_picks dp
+  JOIN pokedex_entries e ON e.id = dp.pokemon_id
+  LEFT JOIN pokedex_season_overrides o
+    ON o.season_id = dp.season_id AND o.pokemon_id = dp.pokemon_id
+  WHERE dp.season_id = ? AND dp.team_id = ?
+`);
+
 export const draftRepo = {
+  /**
+   * Execute work inside a single SQLite transaction.
+   *
+   * IMPORTANT: all reads that influence a subsequent write (e.g. "is already picked")
+   * should happen inside the same transaction to avoid race conditions.
+   */
+  transaction<T>(fn: () => T): T {
+    const tx = dbFile.transaction(fn);
+    return tx();
+  },
+
   getSession(seasonId: number): DraftSessionRow | undefined {
     return getSessionStmt.get(seasonId) as DraftSessionRow | undefined;
   },
@@ -308,6 +335,58 @@ export const draftRepo = {
     return this.listParticipants(seasonId);
   },
 
+  /**
+   * Ensure participants exist for every teamId provided.
+   *
+   * - If a participant row already exists, it is preserved (including isReady).
+   * - Missing teams are appended to the end with increasing positions.
+   *
+   * This supports pre-draft joins without requiring a full reseed.
+   */
+  ensureParticipants(
+    seasonId: number,
+    teamIds: number[]
+  ): DraftParticipantRow[] {
+    const existing = this.listParticipants(seasonId);
+    const existingByTeam = new Map(existing.map((p) => [p.teamId, p] as const));
+
+    let maxPos = 0;
+    for (const p of existing) maxPos = Math.max(maxPos, p.position);
+
+    const missing: number[] = [];
+    for (const teamId of teamIds) {
+      if (!existingByTeam.has(teamId)) missing.push(teamId);
+    }
+
+    if (missing.length === 0) return existing;
+
+    const tx = dbFile.transaction(() => {
+      for (const teamId of missing) {
+        maxPos += 1;
+        insertParticipantStmt.run(seasonId, teamId, maxPos, 0);
+      }
+    });
+    tx();
+
+    return this.listParticipants(seasonId);
+  },
+
+  /**
+   * Update participant positions. Intended for commissioner-controlled
+   * rerolls / manual ordering. Ready flags are preserved.
+   */
+  setParticipantPositions(
+    seasonId: number,
+    positions: { teamId: number; position: number }[]
+  ): void {
+    const tx = dbFile.transaction(() => {
+      for (const p of positions) {
+        updateParticipantPositionStmt.run(p.position, seasonId, p.teamId);
+      }
+    });
+    tx();
+  },
+
   setParticipantReady(
     seasonId: number,
     teamId: number,
@@ -350,6 +429,11 @@ export const draftRepo = {
   listWatchlist(seasonId: number, teamId: number): number[] {
     const rows = listWatchlistStmt.all(seasonId, teamId) as { pokemonId: number }[];
     return rows.map((r) => r.pokemonId);
+  },
+
+  getTeamDraftPoints(seasonId: number, teamId: number): number {
+    const row = sumTeamDraftPointsStmt.get(seasonId, teamId) as any;
+    return Number(row?.points) || 0;
   },
 
   replaceWatchlist(seasonId: number, teamId: number, pokemonIds: number[]): void {

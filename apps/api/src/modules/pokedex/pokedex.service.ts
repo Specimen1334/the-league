@@ -40,6 +40,8 @@ export const pokedexService = {
       const types = safeParseArray(row.types_json);
       const roles = safeParseArray(row.roles_json);
 
+      const bst = computeBst(row.base_stats_json);
+
       const baseCost = row.base_cost;
       const overrideCost = row.override_cost;
       const effectiveCost = overrideCost ?? baseCost ?? null;
@@ -55,7 +57,8 @@ export const pokedexService = {
         spriteUrl: row.sprite_url,
         baseCost,
         effectiveCost,
-        isBanned
+        isBanned,
+        bst
       };
     });
 
@@ -81,12 +84,23 @@ export const pokedexService = {
       throw err;
     }
 
-    const entry = pokedexRepo.getEntryById(pokemonId);
-    if (!entry) {
+    const detail = pokedexRepo.getDexDetail(pokemonId);
+    if (!detail) {
       const err = new Error("Pokémon not found");
       (err as any).statusCode = 404;
       throw err;
     }
+
+    const { entry, abilities, learnsets, parents, children, relatedPokemon, movesByKey } = detail;
+
+    const globalCost = entry.baseCost ?? null;
+    const seasonCost = globalCost;
+    const globalLegality: "Allowed" | "Banned" = globalCost == null ? "Banned" : "Allowed";
+    const seasonLegality: "Allowed" | "Banned" = globalLegality;
+
+    const bst = entry.baseStats ?
+      entry.baseStats.hp + entry.baseStats.atk + entry.baseStats.def + entry.baseStats.spa + entry.baseStats.spd + entry.baseStats.spe
+      : null;
 
     // For now we don’t infer league/season from user; callers that care
     // about a specific season can use /pokedex/balance-votes or a
@@ -95,12 +109,33 @@ export const pokedexService = {
       leagueId: null,
       seasonId: null,
       isBanned: false,
-      effectiveCost: entry.baseCost,
+      effectiveCost: globalCost,
       overrideCost: null
     };
 
     return {
-      entry,
+      pokemonId: entry.pokemonId,
+      name: entry.name,
+      formName: entry.formName,
+      dexNumber: entry.dexNumber,
+      types: entry.types,
+      roles: entry.roles,
+      tags: entry.tags,
+      spriteUrl: entry.spriteUrl,
+      bst,
+      globalCost,
+      seasonCost,
+      globalLegality,
+      seasonLegality,
+      baseStats: entry.baseStats,
+      abilities,
+      learnsets,
+      movesByKey,
+      evolutions: {
+        parents,
+        children,
+        relatedPokemon
+      },
       seasonContext
     };
   },
@@ -208,5 +243,23 @@ function safeParseArray(raw: string | null): string[] {
     return Array.isArray(v) ? v.map(String) : [];
   } catch {
     return [];
+  }
+}
+
+function computeBst(baseStatsJson: string | null): number | null {
+  if (!baseStatsJson) return null;
+  try {
+    const s = JSON.parse(baseStatsJson);
+    if (!s || typeof s !== "object") return null;
+    const hp = Number((s as any).hp);
+    const atk = Number((s as any).atk);
+    const def = Number((s as any).def);
+    const spa = Number((s as any).spa);
+    const spd = Number((s as any).spd);
+    const spe = Number((s as any).spe);
+    if (![hp, atk, def, spa, spd, spe].every((n) => Number.isFinite(n))) return null;
+    return hp + atk + def + spa + spd + spe;
+  } catch {
+    return null;
   }
 }

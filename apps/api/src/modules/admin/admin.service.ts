@@ -7,7 +7,6 @@ import type {
   AdminUpdateSeasonBody,
   AdminUpdateTeamBody,
   AdminUpdateMatchBody,
-  AdminImportBody,
   AdminDangerActionBody,
   AdminUpdateFeatureFlagBody
 } from "./admin.schemas";
@@ -992,30 +991,6 @@ export const adminService = {
       }
     }
     return { ok: true };
-  },
-
-  // -----------------------------
-  // IMPORTS (stubs)
-  // -----------------------------
-  importPokemon(_body: AdminImportBody): { ok: false; reason: string } {
-    return {
-      ok: false,
-      reason: "Pokemon import pipeline not implemented yet."
-    };
-  },
-
-  importMoves(_body: AdminImportBody): { ok: false; reason: string } {
-    return {
-      ok: false,
-      reason: "Moves import pipeline not implemented yet."
-    };
-  },
-
-  importPoints(_body: AdminImportBody): { ok: false; reason: string } {
-    return {
-      ok: false,
-      reason: "Points import pipeline not implemented yet."
-    };
   },
 
   // -----------------------------

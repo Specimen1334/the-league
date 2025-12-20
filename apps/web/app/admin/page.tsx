@@ -82,6 +82,16 @@ type AdminFeatureFlagRow = {
   seasonId: number | null;
 };
 
+
+type PbsImportReport = {
+  dryRun: boolean;
+  sourceTag: string | null;
+  counts: Record<string, number>;
+  warnings: string[];
+  missingDraftWhitelist: string[];
+};
+
+
 // Bodies for PATCH calls
 type AdminUpdateUserBody = {
   username?: string;
@@ -142,7 +152,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 // Root component
 // -----------------------------
 
-type AdminTab = "overview" | "users" | "leagues" | "flags";
+type AdminTab = "overview" | "users" | "leagues" | "flags" | "imports";
 
 export default function AdminControlRoomPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
@@ -197,13 +207,25 @@ export default function AdminControlRoomPage() {
         >
           Feature flags
         </button>
-      </div>
+      
+
+        <button
+          type="button"
+          className={
+            "tabs-item" + (activeTab === "imports" ? " tabs-item--active" : "")
+          }
+          onClick={() => setActiveTab("imports")}
+        >
+          Import
+        </button>
+</div>
 
       <section className="admin-content">
         {activeTab === "overview" && <AdminOverviewTab onJumpTab={setActiveTab} />}
         {activeTab === "users" && <AdminUsersTab />}
         {activeTab === "leagues" && <AdminLeaguesTab />}
         {activeTab === "flags" && <AdminFeatureFlagsTab />}
+        {activeTab === "imports" && <AdminImportsTab />}
       </section>
     </main>
   );
@@ -397,6 +419,204 @@ function OverviewMetric(props: {
     </button>
   );
 }
+
+
+// -----------------------------
+// Import tab
+// -----------------------------
+
+function AdminImportsTab() {
+  const [file, setFile] = useState<File | null>(null);
+  const [dryRun, setDryRun] = useState(true);
+  const [sourceTag, setSourceTag] = useState("initial");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<PbsImportReport | null>(null);
+
+  async function runPbsImport() {
+    setError(null);
+    setReport(null);
+
+    if (!file) {
+      setError("Please select pbs.zip first.");
+      return;
+    }
+
+    const form = new FormData();
+    form.append("file", file);
+
+    const url =
+      `${API_BASE_URL}/admin/pokedex/import-pbs` +
+      `?dryRun=${dryRun ? "1" : "0"}` +
+      `&sourceTag=${encodeURIComponent(sourceTag || "initial")}`;
+
+    setBusy(true);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        body: form,
+        credentials: "include"
+      });
+
+      const body = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const msg =
+          body?.message ||
+          body?.error ||
+          `Import failed with status ${res.status}`;
+        throw new Error(msg);
+      }
+
+      setReport(body as PbsImportReport);
+    } catch (err: any) {
+      setError(err?.message ?? "PBS import failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="stack stack-md">
+      <div className="admin-section-header">
+        <div>
+          <h2 className="section-title">Import</h2>
+          <p className="section-subtitle">
+            Import PBS data (Pokémon, moves, abilities, items, types, learnsets)
+            into the database.
+          </p>
+        </div>
+      </div>
+
+      {error && <div className="form-error">{error}</div>}
+
+      <div className="card">
+        <div className="card-header card-header--subtle">
+          <h3 className="card-title">PBS Import</h3>
+          <p className="card-subtitle">
+            Upload <code>pbs.zip</code>. Run a dry import first to review warnings
+            and missing whitelist entries.
+          </p>
+        </div>
+
+        <div className="card-body">
+          <div className="stack stack-sm">
+            <div className="grid grid-2">
+              <div className="stack stack-xs">
+                <label className="form-label">pbs.zip</label>
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  disabled={busy}
+                />
+              </div>
+
+              <div className="stack stack-xs">
+                <label className="form-label">Source tag</label>
+                <input
+                  className="input"
+                  value={sourceTag}
+                  onChange={(e) => setSourceTag(e.target.value)}
+                  disabled={busy}
+                  placeholder="initial"
+                />
+              </div>
+            </div>
+
+            <label className="badge-toggle">
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={(e) => setDryRun(e.target.checked)}
+                disabled={busy}
+              />
+              <span className={"badge " + (dryRun ? "badge-muted" : "badge-success")}>
+                {dryRun ? "Dry run (no writes)" : "Commit changes"}
+              </span>
+            </label>
+
+            <div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy || !file}
+                onClick={runPbsImport}
+              >
+                {busy ? "Importing…" : dryRun ? "Run dry import" : "Import now"}
+              </button>
+            </div>
+
+            {report && (
+              <div className="stack stack-md" style={{ marginTop: 12 }}>
+                <div className="card">
+                  <div className="card-header card-header--subtle">
+                    <h4 className="card-title">Import report</h4>
+                    <p className="card-subtitle">
+                      {report.dryRun ? "Dry run results" : "Committed import"}{" "}
+                      {report.sourceTag ? `(source: ${report.sourceTag})` : ""}
+                    </p>
+                  </div>
+                  <div className="card-body">
+                    <div className="table-wrapper">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Key</th>
+                            <th>Count</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(report.counts || {}).map(([k, v]) => (
+                            <tr key={k}>
+                              <td>{k}</td>
+                              <td>{v}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {report.missingDraftWhitelist?.length > 0 && (
+                      <div style={{ marginTop: 16 }}>
+                        <h5 className="section-title">Missing draft whitelist entries</h5>
+                        <p className="text-muted">
+                          These were in your canonical draft list, but could not be matched to PBS.
+                        </p>
+                        <ul>
+                          {report.missingDraftWhitelist.map((x) => (
+                            <li key={x}>{x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {report.warnings?.length > 0 && (
+                      <div style={{ marginTop: 16 }}>
+                        <h5 className="section-title">Warnings</h5>
+                        <ul>
+                          {report.warnings.map((w, i) => (
+                            <li key={`${i}-${w}`}>{w}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {report.warnings?.length === 0 &&
+                      report.missingDraftWhitelist?.length === 0 && (
+                        <div className="empty-state">No warnings reported.</div>
+                      )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // -----------------------------
 // Users tab

@@ -10,6 +10,7 @@ import { dbFile } from "../../db/index";
 
 export type TeamRow = {
   id: number;
+  leagueId: number;
   seasonId: number;
   userId: number;
   name: string;
@@ -24,6 +25,9 @@ export type TeamRosterRow = {
   pokemonId: number;
   speciesName: string | null;
   nickname: string | null;
+  spriteUrl: string | null;
+  rolesJson: string | null;
+  baseCost: number | null;
 };
 
 export type TeamItemRow = {
@@ -59,6 +63,7 @@ export type CreateMatchParams = {
 const selectTeamBase = `
   SELECT
     id,
+    league_id  AS leagueId,
     season_id  AS seasonId,
     user_id    AS userId,
     name,
@@ -90,12 +95,13 @@ const listSeasonTeamsStmt = dbFile.prepare<[number]>(`
 `);
 
 const insertTeamStmt = dbFile.prepare<
-  [number, number, string, string | null, string | null]
+  [number, number, number, string, string | null, string | null]
 >(`
-  INSERT INTO teams (season_id, user_id, name, logo_url, bio)
-  VALUES (?, ?, ?, ?, ?)
+  INSERT INTO teams (league_id, season_id, user_id, name, logo_url, bio)
+  VALUES (?, ?, ?, ?, ?, ?)
   RETURNING
     id,
+    league_id  AS leagueId,
     season_id  AS seasonId,
     user_id    AS userId,
     name,
@@ -110,6 +116,7 @@ const transferTeamStmt = dbFile.prepare<[number, number]>(`
   WHERE id = ?
   RETURNING
     id,
+    league_id  AS leagueId,
     season_id  AS seasonId,
     user_id    AS userId,
     name,
@@ -124,10 +131,32 @@ const listRosterStmt = dbFile.prepare<[number]>(`
     r.pokemon_instance_id  AS pokemonInstanceId,
     r.pokemon_id           AS pokemonId,
     r.species_name         AS speciesName,
-    r.nickname             AS nickname
+    r.nickname             AS nickname,
+    e.sprite_url           AS spriteUrl,
+    e.roles_json           AS rolesJson,
+    e.base_cost            AS baseCost
   FROM team_roster r
+  LEFT JOIN pokedex_entries e
+    ON e.id = r.pokemon_id
   WHERE r.team_id = ?
   ORDER BY r.pokemon_instance_id ASC
+`);
+
+const insertRosterRowStmt = dbFile.prepare<[number, number, string]>(`
+  INSERT INTO team_roster (team_id, pokemon_id, species_name)
+  VALUES (?, ?, ?)
+  RETURNING id
+`);
+
+const setRosterInstanceIdStmt = dbFile.prepare<[number, number]>(`
+  UPDATE team_roster
+  SET pokemon_instance_id = ?
+  WHERE id = ?
+`);
+
+const deleteRosterByTeamAndPokemonStmt = dbFile.prepare<[number, number]>(`
+  DELETE FROM team_roster
+  WHERE team_id = ? AND pokemon_id = ?
 `);
 
 const listInventoryStmt = dbFile.prepare<[number]>(`
@@ -219,6 +248,7 @@ export const teamsRepo = {
   },
 
   createTeamForSeason(
+    leagueId: number,
     seasonId: number,
     userId: number,
     name: string,
@@ -226,6 +256,7 @@ export const teamsRepo = {
     bio: string | null
   ): TeamRow {
     return insertTeamStmt.get(
+      leagueId,
       seasonId,
       userId,
       name,
@@ -240,6 +271,29 @@ export const teamsRepo = {
 
   listTeamRoster(teamId: number): TeamRosterRow[] {
     return listRosterStmt.all(teamId) as TeamRosterRow[];
+  },
+
+  /**
+   * Insert a roster row and set pokemon_instance_id = row id.
+   * Returns the assigned pokemonInstanceId.
+   *
+   * IMPORTANT: Callers should wrap this inside an outer DB transaction when
+   * coordinating with other writes (e.g. draft picks).
+   */
+  addPokemonToRoster(teamId: number, pokemonId: number, speciesName: string): number {
+    const idRow = insertRosterRowStmt.get(teamId, pokemonId, speciesName) as any;
+    const rosterRowId = Number(idRow?.id);
+    if (!Number.isInteger(rosterRowId) || rosterRowId <= 0) {
+      const err = new Error("Failed to insert roster row");
+      (err as any).statusCode = 500;
+      throw err;
+    }
+    setRosterInstanceIdStmt.run(rosterRowId, rosterRowId);
+    return rosterRowId;
+  },
+
+  removePokemonFromRoster(teamId: number, pokemonId: number): void {
+    deleteRosterByTeamAndPokemonStmt.run(teamId, pokemonId);
   },
 
   listTeamInventory(teamId: number): TeamItemRow[] {

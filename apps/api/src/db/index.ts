@@ -144,6 +144,13 @@ function initializeSchema() {
     );
   `);
 
+  // Prevent accidental duplicate roster entries for a team.
+  // Draft picks and free agency both rely on (team_id, pokemon_id) being unique.
+  dbFile.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_team_roster_team_pokemon
+      ON team_roster(team_id, pokemon_id);
+  `);
+
   dbFile.exec(`
     CREATE TABLE IF NOT EXISTS team_items (
       team_id INTEGER NOT NULL,
@@ -275,6 +282,17 @@ function initializeSchema() {
       FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE,
       FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
     );
+  `);
+
+  // Draft integrity: prevent duplicate picks for the same Pokémon within a season,
+  // and prevent two rows claiming the same overall pick number.
+  dbFile.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_picks_season_pokemon
+      ON draft_picks(season_id, pokemon_id);
+  `);
+  dbFile.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_picks_season_overall
+      ON draft_picks(season_id, overall_pick_number);
   `);
 
   dbFile.exec(`
@@ -411,6 +429,141 @@ function initializeSchema() {
       roles_json TEXT,
       tags_json TEXT,
       types_json TEXT
+    );
+  `);
+
+  // Minimal evolutions: stable identity + import metadata + draft whitelist flags
+  ensureColumn(
+    "pokedex_entries",
+    "species_key",
+    "ALTER TABLE pokedex_entries ADD COLUMN species_key TEXT NULL;"
+  );
+  ensureColumn(
+    "pokedex_entries",
+    "form_key",
+    "ALTER TABLE pokedex_entries ADD COLUMN form_key TEXT NULL;"
+  );
+  ensureColumn(
+    "pokedex_entries",
+    "form_key_norm",
+    "ALTER TABLE pokedex_entries ADD COLUMN form_key_norm TEXT NOT NULL DEFAULT '';"
+  );
+  ensureColumn(
+    "pokedex_entries",
+    "is_draftable_default",
+    "ALTER TABLE pokedex_entries ADD COLUMN is_draftable_default INTEGER NOT NULL DEFAULT 0;"
+  );
+  ensureColumn(
+    "pokedex_entries",
+    "is_battle_only_form",
+    "ALTER TABLE pokedex_entries ADD COLUMN is_battle_only_form INTEGER NOT NULL DEFAULT 0;"
+  );
+  ensureColumn(
+    "pokedex_entries",
+    "is_archived",
+    "ALTER TABLE pokedex_entries ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;"
+  );
+  ensureColumn(
+    "pokedex_entries",
+    "imported_at",
+    "ALTER TABLE pokedex_entries ADD COLUMN imported_at TEXT NULL;"
+  );
+  ensureColumn(
+    "pokedex_entries",
+    "source_tag",
+    "ALTER TABLE pokedex_entries ADD COLUMN source_tag TEXT NULL;"
+  );
+
+  dbFile.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_pokedex_entries_species_form_norm
+     ON pokedex_entries(species_key, form_key_norm);`
+  );
+
+  // Dex detail tables (PBS import)
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_moves (
+      key TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT,
+      category TEXT,
+      power INTEGER,
+      accuracy INTEGER,
+      pp INTEGER,
+      priority INTEGER,
+      target TEXT,
+      function_code TEXT,
+      effect_chance INTEGER,
+      flags TEXT,
+      description TEXT
+    );
+  `);
+
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_abilities (
+      key TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT
+    );
+  `);
+
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_items (
+      key TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      pocket TEXT,
+      flags TEXT
+    );
+  `);
+
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_types (
+      key TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      damage_relations_json TEXT NOT NULL
+    );
+  `);
+
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_natures (
+      key TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      increased_stat TEXT,
+      decreased_stat TEXT,
+      description TEXT
+    );
+  `);
+
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_pokemon_abilities (
+      pokemon_id INTEGER NOT NULL,
+      slot TEXT NOT NULL, -- ability1 | ability2 | hidden
+      ability_key TEXT NOT NULL,
+      PRIMARY KEY (pokemon_id, slot),
+      FOREIGN KEY (pokemon_id) REFERENCES pokedex_entries(id) ON DELETE CASCADE,
+      FOREIGN KEY (ability_key) REFERENCES dex_abilities(key) ON DELETE CASCADE
+    );
+  `);
+
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_pokemon_evolutions (
+      from_pokemon_id INTEGER NOT NULL,
+      to_pokemon_id INTEGER NOT NULL,
+      method TEXT NOT NULL,
+      param TEXT,
+      PRIMARY KEY (from_pokemon_id, to_pokemon_id, method, param),
+      FOREIGN KEY (from_pokemon_id) REFERENCES pokedex_entries(id) ON DELETE CASCADE,
+      FOREIGN KEY (to_pokemon_id) REFERENCES pokedex_entries(id) ON DELETE CASCADE
+    );
+  `);
+
+  dbFile.exec(`
+    CREATE TABLE IF NOT EXISTS dex_pokemon_learnsets (
+      pokemon_id INTEGER PRIMARY KEY,
+      level_up_json TEXT NOT NULL,
+      egg_moves_json TEXT NOT NULL,
+      tutor_moves_json TEXT NOT NULL,
+      FOREIGN KEY (pokemon_id) REFERENCES pokedex_entries(id) ON DELETE CASCADE
     );
   `);
 
