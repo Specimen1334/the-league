@@ -30,15 +30,17 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Public auth pages are always allowed for unauthenticated users.
-  // If you're already authenticated, don't let you sit on login/register.
+  // Public auth pages are always allowed.
+  //
+  // IMPORTANT:
+  // We deliberately do NOT redirect "authenticated" users away from /login
+  // or other auth routes here.
+  //
+  // This middleware can only see whether a session cookie exists, not whether
+  // that cookie is still valid server-side. If the cookie is stale/invalid
+  // (e.g. server restart, cleared sessions), redirecting away from /login would
+  // trap the user in a loop where protected pages 401 and /login is unreachable.
   if (AUTH_PATHS.has(pathname)) {
-    if (isAuthed) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/dashboard";
-      url.search = "";
-      return NextResponse.redirect(url);
-    }
     return NextResponse.next();
   }
 
