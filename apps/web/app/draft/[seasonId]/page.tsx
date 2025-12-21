@@ -1545,10 +1545,17 @@ export default function DraftHubPage() {
     key={p.pokemonId}
     className={`card border ${picked ? "opacity-70" : ""} ${pickedByYou ? "border-brand" : "border-subtle"} draft-pool-card`}
   >
-    <button
-      type="button"
+    <div
+      role="button"
       className="draft-flip"
       onClick={() => openDetails(p)}
+	  onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openDetails(p);
+        }
+      }}
+      tabIndex={0}
       title={isMobile ? "Open details" : "Flip card"}
       aria-pressed={flipped.has(p.pokemonId)}
     >
@@ -1563,28 +1570,40 @@ export default function DraftHubPage() {
             )}
 
             <div className="draft-sprite-overlay">
-              {(p.types ?? []).slice(0, 2).map((t) => (
-                <span
-  key={t}
-  className="draft-type-chip"
-  style={
-    (() => {
-      const nt = normalizeType(t);
-      const bg = nt ? TYPE_COLORS[nt] : undefined;
-      return bg ? { backgroundColor: bg, borderColor: bg } : undefined;
-    })()
-  }
->
-  {normalizeType(t) ?? t}
-</span>
-              ))}
+              <div className="draft-type-row">
+                {(p.types ?? []).slice(0, 2).map((t) => (
+                  <span
+                    key={t}
+                    className="draft-type-chip"
+                    style={
+                      (() => {
+                        const nt = normalizeType(t);
+                        const bg = nt ? TYPE_COLORS[nt] : undefined;
+                        return bg ? { backgroundColor: bg, borderColor: bg } : undefined;
+                      })()
+                    }
+                  >
+                    {normalizeType(t) ?? t}
+                  </span>
+                ))}
+              </div>
+
+            <div className="draft-watch-btn-wrapper">
+                <button
+                  className={`draft-watch-btn ${watch ? "is-active" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleWatch(p.pokemonId);
+                  }}
+                  title={watch ? "Remove from watchlist" : "Add to watchlist"}
+                  type="button"
+                >
+                  {watch ? "★" : "☆"}
+                </button>
+              </div>
             </div>
 
-            {picked ? (
-              <div className="draft-sprite-badge">
-                Drafted
-              </div>
-            ) : null}
+            {picked ? <div className="draft-sprite-badge">Drafted</div> : null}
           </div>
 
           <div className="draft-card-body">
@@ -1594,8 +1613,9 @@ export default function DraftHubPage() {
             </div>
 
             <div className="draft-card-meta">
-              <span className="draft-cost">Pts: {p.baseCost ?? "—"}</span>
-              <span className="draft-star-hint text-muted">Click to flip</span>
+              <span className="draft-cost-label">Pts</span>
+              <span className="draft-cost-value">{p.baseCost ?? "—"}</span>
+              <span className="draft-card-hint">Click to flip</span>
             </div>
           </div>
         </div>
@@ -1616,34 +1636,33 @@ export default function DraftHubPage() {
               <StatLine label="SPE" v={p.baseStats?.spe} />
             </div>
 
-            <div className="draft-card-meta">
-              <span className="draft-cost">Pts: {p.baseCost ?? "—"}</span>
-              {(p.roles ?? []).length ? (
-                <span className="draft-roles text-muted">{(p.roles ?? []).slice(0, 2).join(", ")}</span>
-              ) : (
-                <span className="draft-roles text-muted">—</span>
-              )}
+            <div className="draft-abilities">
+              <span className="draft-abilities-label">Abilities</span>
+              <div className="draft-abilities-list">
+                {(p.roles ?? []).length ? (
+                  (p.roles ?? []).slice(0, 3).map((r) => (
+                    <span key={r} className="draft-ability-chip">
+                      {r}
+                    </span>
+                  ))
+                ) : (
+                  <span className="draft-ability-chip is-empty">—</span>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </button>
+    </div>
 
     <div className="draft-card-actions">
-      <button
-        className={`btn btn-sm btn-ghost ${watch ? "text-warning" : "text-muted"}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleWatch(p.pokemonId);
-        }}
-        title={watch ? "Remove from watchlist" : "Add to watchlist"}
-        type="button"
-      >
-        {watch ? "★" : "☆"}
-      </button>
+      <div className="draft-cost-block">
+        <span className="draft-cost-label">Pts</span>
+        <span className="draft-cost-value">{p.baseCost ?? "—"}</span>
+      </div>
 
       <button
-        className="btn btn-sm"
+        className="btn btn-sm draft-action-btn"
         onClick={(e) => {
           e.stopPropagation();
           makePick(p.pokemonId);
@@ -1662,7 +1681,7 @@ export default function DraftHubPage() {
             : "Make pick"
         }
       >
-        Draft
+        {picked ? "Drafted" : "Draft"}
       </button>
     </div>
   </div>
