@@ -36,21 +36,6 @@
   --gap-md: 1rem;
   --gap-lg: 1.5rem;
   --gap-xl: 2rem;
-
-  /* Tailwind palette bridges (used by draft redesign pages) */
-  --tw-brand: #27cdee;
-  --tw-brand-dark: #199bb4;
-  --tw-surface: #0f172a;
-  --tw-surface-2: #121a2c;
-  --tw-card: #7be7f5;
-}
-
-html.dark {
-  color-scheme: dark;
-}
-
-html:not(.dark) {
-  color-scheme: light;
 }
 
 /* Basic reset */
@@ -222,10 +207,6 @@ body {
   white-space: nowrap;
   border: 0;
 }
-
-/* Tailwind utilities (preflight disabled in config) */
-@tailwind components;
-@tailwind utilities;
 
 /* Links */
 a {
