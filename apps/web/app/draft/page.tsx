@@ -45,7 +45,7 @@ function badge(status: LeagueSeasonSummary["status"]) {
 }
 
 export default function DraftBrowserPage() {
-  const { user, loading } = useAuth();
+  const { user, isLoading } = useAuth();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [items, setItems] = React.useState<
@@ -53,7 +53,7 @@ export default function DraftBrowserPage() {
   >([]);
 
   React.useEffect(() => {
-    if (loading) return;
+    if (isLoading) return;
     if (!user) return;
 
     let alive = true;
@@ -98,7 +98,7 @@ export default function DraftBrowserPage() {
     return () => {
       alive = false;
     };
-  }, [loading, user]);
+  }, [isLoading, user]);
 
   return (
     <main className="max-w-[1100px] mx-auto p-4">
@@ -122,7 +122,7 @@ export default function DraftBrowserPage() {
         </div>
       ) : null}
 
-      {!user && !loading ? (
+      {!user && !isLoading ? (
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
           <p className="text-sm opacity-80">You need to sign in to view your drafts.</p>
           <Link href="/login" className="inline-block mt-3 px-3 py-2 rounded-xl bg-brand text-black hover:brightness-110">

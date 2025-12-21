@@ -70,7 +70,7 @@ function fmtClock(s: number) {
 export default function DraftRoomPage() {
   const params = useParams<{ seasonId: string }>();
   const seasonId = Number(params?.seasonId);
-  const { user, loading } = useAuth();
+  const { user, isLoading } = useAuth();
   const isMobile = useIsMobile();
 
   const [overview, setOverview] = React.useState<SeasonOverviewResponse | null>(null);
@@ -150,7 +150,7 @@ export default function DraftRoomPage() {
 
   // Initial load + poll
   React.useEffect(() => {
-    if (loading) return;
+    if (isLoading) return;
     if (!user) return;
 
     let alive = true;
@@ -185,7 +185,7 @@ export default function DraftRoomPage() {
       alive = false;
       clearInterval(t);
     };
-  }, [loadAll, loading, seasonId, user]);
+}, [loadAll, isLoading, seasonId, user]);
 
   const cap = settings?.settings.draftPointCap ?? 0;
   const spent = React.useMemo(() => {
@@ -297,7 +297,7 @@ export default function DraftRoomPage() {
     );
   }
 
-  if (!user && !loading) {
+  if (!user && !isLoading) {
     return (
       <main className="max-w-[1100px] mx-auto p-4">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
