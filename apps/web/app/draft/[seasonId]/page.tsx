@@ -1457,9 +1457,22 @@ export default function DraftHubPage() {
               return viewMode === "classic" ? (
                 <div
                   key={p.pokemonId}
-                  className={`card draft-classic-card ${picked ? "opacity-70" : ""} ${pickedByYou ? "draft-classic-card--mine" : ""}`}
+                  className={`card draft-classic-card ${picked ? "opacity-70" : ""} ${
+                    pickedByYou ? "draft-classic-card--mine" : ""
+                  }`}
                 >
-                  <div className="flex items-start gap-3">
+                  <div className="draft-classic-watch">
+                    <button
+                      className={`draft-watch-btn ${watch ? "is-active" : ""}`}
+                      onClick={() => onToggleWatch(p.pokemonId)}
+                      title={watch ? "Remove from watchlist" : "Add to watchlist"}
+                      type="button"
+                    >
+                      {watch ? "★" : "☆"}
+                    </button>
+                  </div>
+
+                  <div className="draft-classic-layout">
                     <div className="draft-classic-sprite">
                       {p.spriteUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -1469,35 +1482,20 @@ export default function DraftHubPage() {
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="draft-classic-name truncate">
-                            {p.name} {p.dexNumber ? <span className="text-xs text-muted">#{p.dexNumber}</span> : null}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {(p.types ?? []).map((t) => (
-                              <TypePill key={t} t={t} />
-                            ))}
-                            {(p.roles ?? []).slice(0, 2).map((r) => (
-                              <span key={r} className="badge badge-soft text-xs">
-                                {r}
-                              </span>
-                            ))}
-                          </div>
+                    <div className="draft-classic-main">
+                      <div className="draft-classic-header">
+                        <div className="draft-classic-title">
+                          <div className="draft-classic-name truncate">{p.name}</div>
+                          {p.dexNumber ? <div className="draft-classic-dex">#{p.dexNumber}</div> : null}
                         </div>
-
-                        <button
-                          className={`btn btn-sm btn-ghost ${watch ? "text-warning" : "text-muted"}`}
-                          onClick={() => onToggleWatch(p.pokemonId)}
-                          title={watch ? "Remove from watchlist" : "Add to watchlist"}
-                          type="button"
-                        >
-                          {watch ? "★" : "☆"}
-                        </button>
+                        <div className="draft-classic-types">
+                          {(p.types ?? []).map((t) => (
+                            <TypePill key={t} t={t} />
+                          ))}
+                        </div>
                       </div>
 
-                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                      <div className="draft-classic-stats">
                         <StatLine label="HP" v={p.baseStats?.hp} />
                         <StatLine label="ATK" v={p.baseStats?.atk} />
                         <StatLine label="DEF" v={p.baseStats?.def} />
@@ -1505,41 +1503,41 @@ export default function DraftHubPage() {
                         <StatLine label="SpD" v={p.baseStats?.spd} />
                         <StatLine label="SPE" v={p.baseStats?.spe} />
                       </div>
+					  </div>
+                  </div>
 
-                      <div className="mt-3 flex items-center justify-between">
-                        <div className="text-xs text-muted">
-                          Cost: <span className="text-foreground font-mono">{p.baseCost ?? "—"}</span>
-                          {picked ? (
-                            <span className="ml-2 badge badge-soft">
-                              Drafted by{" "}
-                              {p.pickedByTeamId ? teamNameById.get(p.pickedByTeamId) ?? `Team #${p.pickedByTeamId}` : "?"}
-                            </span>
-                          ) : null}
-                        </div>
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => makePick(p.pokemonId)}
-                          disabled={!canPickNow}
-                          type="button"
-                          title={
-                            !canPickNow
-                              ? picked
-                                ? "Already drafted"
-                                : lobby.status !== "InProgress"
-                                  ? "Draft not in progress"
-                                  : !isYourTurn
-                                    ? "Not your turn"
-                                    : ""
-                              : "Make pick"
-                          }
-                        >
-                          Pick
-                        </button>
-                      </div>
+                      <div className="draft-classic-footer">
+                    <button
+                      className="btn btn-sm draft-classic-cta"
+                      onClick={() => makePick(p.pokemonId)}
+                      disabled={!canPickNow}
+                      type="button"
+                      title={
+                        !canPickNow
+                          ? picked
+                            ? "Already drafted"
+                            : lobby.status !== "InProgress"
+                              ? "Draft not in progress"
+                              : !isYourTurn
+                                ? "Not your turn"
+                                : ""
+                          : "Make pick"
+                      }
+                    >
+                      Draft
+                    </button>
+                    <div className="draft-classic-points">
+                      <span className="draft-classic-points-label">Points</span>
+                      <span className="draft-classic-points-value">{p.baseCost ?? "—"}</span>
+                      {picked ? (
+                        <span className="draft-classic-picked">
+                          Drafted by{" "}
+                          {p.pickedByTeamId ? teamNameById.get(p.pickedByTeamId) ?? `Team #${p.pickedByTeamId}` : "?"}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </div>
-              
 ) : (
   <div
     key={p.pokemonId}

@@ -1583,38 +1583,93 @@ textarea.input {
    ───────────────────────────────────────────────────────────── */
 
 .draft-classic-card {
-  border: 1px solid var(--color-border);
-  border-radius: calc(var(--radius-lg) + 4px);
-  background: var(--color-surface);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.10);
+  position: relative;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.1rem;
+  background: radial-gradient(110% 110% at 15% 10%, rgba(124, 58, 237, 0.12), rgba(15, 23, 42, 0.65)),
+    linear-gradient(180deg, #0c1323 0%, #0a1120 100%);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
 [data-theme="light"] .draft-classic-card {
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  background: radial-gradient(120% 120% at 18% 10%, rgba(124, 58, 237, 0.06), rgba(255, 255, 255, 0.9)),
+    linear-gradient(180deg, #f8fafc, #eef2ff);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
 }
 
 .draft-classic-card--mine {
-  border-color: rgba(59, 130, 246, 0.35);
+  border-color: rgba(59, 130, 246, 0.45);
   box-shadow:
     0 0 0 1px rgba(59, 130, 246, 0.18),
-    0 12px 28px rgba(0, 0, 0, 0.12);
+    0 18px 36px rgba(0, 0, 0, 0.16);
+}
+
+.draft-classic-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow:
+    0 22px 48px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] .draft-classic-card:hover {
+  border-color: rgba(124, 58, 237, 0.35);
+  box-shadow:
+    0 18px 36px rgba(124, 58, 237, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.draft-classic-layout {
+  display: flex;
+  gap: 0.9rem;
+  align-items: flex-start;
+}
+
+.draft-classic-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.draft-classic-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.draft-classic-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
 }
 
 .draft-classic-sprite {
-  width: 3.25rem;
-  height: 3.25rem;
-  border-radius: 0.9rem;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.35));
+  width: 3.6rem;
+  height: 3.6rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(120% 120% at 50% 20%, rgba(255, 255, 255, 0.08), rgba(15, 23, 42, 0.65));
   display: grid;
   place-items: center;
   overflow: hidden;
   flex: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 [data-theme="light"] .draft-classic-sprite {
-  border: 1px solid rgba(15, 23, 42, 0.10);
-  background: linear-gradient(180deg, rgba(148, 163, 184, 0.35), rgba(148, 163, 184, 0.18));
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.28), rgba(148, 163, 184, 0.12));
 }
 
 .draft-classic-sprite-img {
@@ -1625,9 +1680,161 @@ textarea.input {
 }
 
 .draft-classic-name {
-  font-size: 0.95rem;
-  font-weight: 650;
+  font-size: 1.05rem;
+  font-weight: 725;
   letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.draft-classic-dex {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--color-text-muted);
+}
+
+.draft-classic-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.draft-classic-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem 0.55rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="light"] .draft-classic-stats {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.draft-classic-stats .draft-stat-row {
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+  color: #9ca3af;
+}
+
+[data-theme="light"] .draft-classic-stats .draft-stat-row {
+  color: #475569;
+}
+
+.draft-classic-stats .draft-stat-val {
+  color: #e5e7eb;
+  font-weight: 700;
+}
+
+[data-theme="light"] .draft-classic-stats .draft-stat-val {
+  color: #0f172a;
+}
+
+.draft-classic-footer {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.draft-classic-cta {
+  width: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #7c3aed);
+  border: none;
+  color: #fff;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.9rem;
+  box-shadow: 0 10px 25px rgba(124, 58, 237, 0.35);
+}
+
+.draft-classic-cta:disabled {
+  background: #1f2937;
+  color: #9ca3af;
+  box-shadow: none;
+}
+
+[data-theme="light"] .draft-classic-cta:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+}
+
+.draft-classic-cta:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+
+.draft-classic-cta:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.draft-classic-points {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: #9ca3af;
+  line-height: 1.2;
+}
+
+.draft-classic-points-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+[data-theme="light"] .draft-classic-points,
+[data-theme="light"] .draft-classic-points-label {
+  color: #475569;
+}
+
+.draft-classic-points-value {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 750;
+  color: #f8fafc;
+}
+
+[data-theme="light"] .draft-classic-points-value {
+  color: #0f172a;
+}
+
+.draft-classic-picked {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  font-size: 0.76rem;
+}
+
+[data-theme="light"] .draft-classic-picked {
+  background: rgba(251, 191, 36, 0.16);
+}
+
+.draft-classic-watch {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+}
+
+.draft-classic-watch .draft-watch-btn {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="light"] .draft-classic-watch .draft-watch-btn {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #475569;
 }
 
 .draft-online-dot {
