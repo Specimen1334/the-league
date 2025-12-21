@@ -367,8 +367,6 @@ export const draftService = {
           types,
           roles,
           baseCost: row.override_cost ?? row.base_cost ?? null,
-          abilities: abilitiesByPokemonId.get(pokemonId) ?? [],
-          moves: movesByPokemonId.get(pokemonId) ?? [],
           isPicked,
           pickedByTeamId
         };

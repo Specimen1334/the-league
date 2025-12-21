@@ -89,8 +89,6 @@ export type DraftPoolQuery = {
   search?: string;
   type?: string;
   role?: string;
-  ability?: string;
-  move?: string;
   onlyAvailable?: boolean;
   page?: number;
   limit?: number;
@@ -115,9 +113,6 @@ export type DraftPoolItem = {
   types: string[];
   roles: string[];
   baseCost: number | null;
-  abilities: string[];
-  moves: string[];
-
   isPicked: boolean;
   pickedByTeamId: number | null;
 };

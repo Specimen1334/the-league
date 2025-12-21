@@ -97,8 +97,6 @@ type DraftPoolItem = {
   types: string[];
   roles: string[];
   baseCost: number | null;
-  abilities: string[];
-  moves: string[];
   isPicked: boolean;
   pickedByTeamId: number | null;
 };
@@ -260,8 +258,7 @@ export default function DraftHubPage() {
     const beat = async () => {
       try {
         const res = await apiFetchJson<{ onlineUserIds: number[] }>(`/seasons/${seasonId}/draft/presence`, {
-          method: "POST",
-          body: JSON.stringify({})
+          method: "POST"
         });
         if (alive) setOnlineUserIds(Array.isArray(res.onlineUserIds) ? res.onlineUserIds : []);
       } catch {
@@ -300,8 +297,6 @@ export default function DraftHubPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [roleFilter, setRoleFilter] = useState<string>("");
-  const [abilityFilter, setAbilityFilter] = useState<string>("");
-  const [moveFilter, setMoveFilter] = useState<string>("");
   const [minPoints, setMinPoints] = useState<string>("");
   const [maxPoints, setMaxPoints] = useState<string>("");
   const [hideDrafted, setHideDrafted] = useState(true);
@@ -663,13 +658,11 @@ export default function DraftHubPage() {
     if (search.trim()) n++;
     if (typeFilter.trim()) n++;
     if (roleFilter.trim()) n++;
-    if (abilityFilter.trim()) n++;
-    if (moveFilter.trim()) n++;
     if (minPoints.trim()) n++;
     if (maxPoints.trim()) n++;
     if (!hideDrafted) n++;
     return n;
-  }, [hideDrafted, maxPoints, minPoints, moveFilter, abilityFilter, roleFilter, search, typeFilter]);
+  }, [hideDrafted, maxPoints, minPoints, roleFilter, search, typeFilter]);
 
   const draftedIds = useMemo(() => new Set<number>(state?.picks.map((p) => p.pokemonId) ?? []), [state?.picks]);
 
@@ -951,111 +944,37 @@ export default function DraftHubPage() {
   const turnGlowClass = showTurnGlow ? (isYourTurn ? "draft-turn-glow draft-turn-glow--green" : "draft-turn-glow draft-turn-glow--red") : "";
   const boardPicks = (state?.picks ?? []).filter((p) => (boardMode === "mine" ? p.teamId === my?.teamId : true));
 
-  const DraftPoolClassicCard = ({ p }: { p: DraftPoolItem }) => {
-    const picked = p.isPicked;
-    const pickedByYou = picked && p.pickedByTeamId != null && p.pickedByTeamId === my?.teamId;
-    const watch = watchlistSet.has(p.pokemonId);
-    const canPickNow = lobby.status === "InProgress" && isYourTurn && !picked;
-
-    return (
-      <div
-        className={`card draft-classic-card ${picked ? "opacity-70" : ""} ${pickedByYou ? "border-brand" : "border-subtle"}`}
-      >
-        <div className="draft-classic-top">
-          <div className="draft-classic-sprite">
-            {p.spriteUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={p.spriteUrl} alt={p.name} className="draft-classic-sprite-img" />
-            ) : (
-              <span className="text-xs text-muted">?</span>
-            )}
-          </div>
-
-          <div className="draft-classic-main">
-            <div className="draft-classic-name">
-              <span className="truncate font-semibold">{p.name}</span>
-              {p.dexNumber ? <span className="text-xs text-muted ml-1">#{p.dexNumber}</span> : null}
-            </div>
-
-            <div className="draft-classic-types">
-              {(p.types ?? []).slice(0, 2).map((t) => (
-                <TypePill key={t} t={t} />
-              ))}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className={`btn-icon ml-auto ${watch ? "text-warning" : "text-muted"}`}
-            onClick={() => onToggleWatch(p.pokemonId)}
-            title={watch ? "Remove from watchlist" : "Add to watchlist"}
-          >
-            ★
-          </button>
-        </div>
-
-        <div className="draft-classic-meta">
-          <span>
-            Dex # <span className="font-mono">{p.dexNumber ?? p.pokemonId}</span>
-          </span>
-          <span>
-            Cost <span className="font-mono">{p.baseCost ?? "—"}</span>
-          </span>
-        </div>
-
-        <button
-          className="btn btn-sm"
-          onClick={() => makePick(p.pokemonId)}
-          disabled={!canPickNow}
-          type="button"
-          title={
-            !canPickNow
-              ? picked
-                ? "Already drafted"
-                : lobby.status !== "InProgress"
-                  ? "Draft not in progress"
-                  : !isYourTurn
-                    ? "Not your turn"
-                    : ""
-              : "Make pick"
-          }
-        >
-          {picked ? "Already drafted" : lobby.status === "InProgress" ? "Draft this Pokémon" : "Draft not active"}
-        </button>
-
-        {picked ? (
-          <div className="draft-classic-picked">
-            Drafted by {p.pickedByTeamId ? teamNameById.get(p.pickedByTeamId) ?? `Team #${p.pickedByTeamId}` : "?"}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
   return (
     <div className={`stack stack-lg ${turnGlowClass}`}>
       <PageHeader
         title={`Draft — ${seasonName ?? `Season #${seasonId}`}`}
-        breadcrumb={
-          leagueId ? (
-            <Link className="link" href={`/leagues/${leagueId}`}>
-              {leagueName ?? "League"}
-            </Link>
-          ) : undefined
-        }
-        subtitle={badge.label}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {state?.teamOnTheClock ? <span className="badge badge-outline">On the clock: {state.teamOnTheClock.teamName}</span> : null}
-            {state?.timer?.pickTimerSeconds ? <span className="badge badge-soft">Timer: {state.timer.pickTimerSeconds}s</span> : null}
-            {onlineUserIds.length ? <span className="badge badge-soft">Online: {onlineUserIds.length}</span> : null}
-            {isYourTurn && lobby.status === "InProgress" ? <span className="badge badge-success">Your pick</span> : null}
-          </div>
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            {leagueId ? (
+              <Link className="link" href={`/leagues/${leagueId}`}>
+                {leagueName ?? "League"}
+              </Link>
+            ) : (
+              <span className="text-muted">No league</span>
+            )}
+            <span className={badge.className}>{badge.label}</span>
+            {state?.teamOnTheClock ? (
+              <span className="badge badge-outline">
+                On the clock: {state.teamOnTheClock.teamName}
+              </span>
+            ) : null}
+            {state?.timer?.pickTimerSeconds ? (
+              <span className="badge badge-soft">Timer: {state.timer.pickTimerSeconds}s</span>
+            ) : null}
+            {onlineUserIds.length ? (
+              <span className="badge badge-soft">Online: {onlineUserIds.length}</span>
+            ) : null}
+          </span>
         }
       />
 
-      {/* Picks board (top) - compact */}
-      <div className="card draft-board-card">
+      {/* Picks board (top) */}
+      <div className="card p-4 mb-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-sm font-semibold">Draft board</div>
@@ -1107,33 +1026,34 @@ export default function DraftHubPage() {
               </button>
             </div>
 
+            {isYourTurn && lobby.status === "InProgress" ? <span className="badge badge-success">Your pick</span> : null}
           </div>
         </div>
 
-        <div ref={boardScrollRef} className="mt-3 max-h-[180px] overflow-auto rounded-md border border-subtle">
+        <div ref={boardScrollRef} className="mt-4 max-h-[320px] overflow-auto rounded-md border border-subtle">
           {boardStyle === "table" ? (
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead className="sticky top-0 bg-surface">
                 <tr>
-                  <th className="text-left py-1 px-2 w-14">#</th>
-                  <th className="text-left py-1 px-2">Team</th>
-                  <th className="text-left py-1 px-2">Pokémon</th>
+                  <th className="text-left p-2 w-16">#</th>
+                  <th className="text-left p-2">Team</th>
+                  <th className="text-left p-2">Pokémon</th>
                 </tr>
               </thead>
               <tbody>
                 {boardPicks.map((p) => (
                   <tr key={p.id} className="border-t border-subtle">
-                    <td className="py-1 px-2 font-mono">{p.overallPickNumber}</td>
-                    <td className="py-1 px-2 truncate">{teamNameById.get(p.teamId) ?? p.teamName ?? `Team #${p.teamId}`}</td>
-                    <td className="py-1 px-2">
+                    <td className="p-2 font-mono">{p.overallPickNumber}</td>
+                    <td className="p-2 truncate">{teamNameById.get(p.teamId) ?? p.teamName ?? `Team #${p.teamId}`}</td>
+                    <td className="p-2">
                       <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                        <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
                           {p.spriteUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={p.spriteUrl}
                               alt={p.pokemonName ?? String(p.pokemonId)}
-                              className="w-7 h-7 object-contain"
+                              className="w-8 h-8 object-contain"
                             />
                           ) : (
                             <span className="text-xs text-muted">?</span>
@@ -1155,29 +1075,29 @@ export default function DraftHubPage() {
               </tbody>
             </table>
           ) : (
-            <div className="p-2">
-              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(10rem,1fr))]">
+            <div className="p-3">
+              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(12rem,1fr))]">
                 {boardPicks.map((p) => {
                   const meta = poolById.get(p.pokemonId);
                   return (
-                    <div key={p.id} className="rounded-md border border-subtle p-2 bg-surface">
+                    <div key={p.id} className="rounded-md border border-subtle p-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                        <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
                           {p.spriteUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={p.spriteUrl}
                               alt={p.pokemonName ?? String(p.pokemonId)}
-                              className="w-7 h-7 object-contain"
+                              className="w-9 h-9 object-contain"
                             />
                           ) : (
                             <span className="text-xs text-muted">?</span>
                           )}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-[10px] text-muted font-mono">#{p.overallPickNumber}</div>
-                          <div className="text-xs font-semibold truncate">{p.pokemonName ?? `Pokémon #${p.pokemonId}`}</div>
-                          <div className="text-[11px] text-muted truncate">
+                          <div className="text-xs text-muted font-mono">#{p.overallPickNumber}</div>
+                          <div className="draft-classic-name truncate">{p.pokemonName ?? `Pokémon #${p.pokemonId}`}</div>
+                          <div className="text-xs text-muted truncate">
                             {teamNameById.get(p.teamId) ?? p.teamName ?? `Team #${p.teamId}`}
                           </div>
                         </div>
@@ -1230,7 +1150,42 @@ export default function DraftHubPage() {
                 );
               })}
             </div>
-          </div>
+	          </div>
+
+	          <div className="card p-4">
+	            <div className="flex items-center justify-between">
+	              <div className="text-sm font-semibold">Coaches</div>
+	              <span className="badge badge-soft">{lobby.participants.length}</span>
+	            </div>
+	            <div className="mt-3 space-y-1">
+	              {lobby.participants.map((p) => {
+	                const online = onlineUserIds.includes(p.managerUserId);
+	                return (
+	                  <div
+	                    key={p.teamId}
+	                    className={`flex items-center justify-between rounded-lg px-3 py-2 ${
+	                      p.isYou ? "border border-brand/30 bg-brand/5" : "border border-subtle"
+	                    }`}
+	                  >
+	                    <div className="min-w-0">
+	                      <div className="flex items-center gap-2 min-w-0">
+	                        <span
+	                          className={`draft-online-dot ${online ? "draft-online-dot--on" : ""}`}
+	                          aria-label={online ? "Online" : "Offline"}
+	                          title={online ? "Online" : "Offline"}
+	                        />
+	                        <div className="text-sm font-medium truncate">{p.teamName}</div>
+	                      </div>
+	                      <div className="text-xs text-muted truncate">{p.managerDisplayName ?? `User #${p.managerUserId}`}</div>
+	                    </div>
+	                    <div className="flex items-center gap-2">
+	                      {p.isReady ? <span className="badge badge-success">Ready</span> : <span className="badge badge-soft">Not ready</span>}
+	                    </div>
+	                  </div>
+	                );
+	              })}
+	            </div>
+	          </div>
 
           {canManage ? (
             <div className="card p-4">
@@ -1412,27 +1367,6 @@ export default function DraftHubPage() {
 
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-xs text-muted">Ability</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={abilityFilter}
-                          onChange={(e) => setAbilityFilter(e.target.value)}
-                          placeholder="e.g. Intimidate"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted">Move</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={moveFilter}
-                          onChange={(e) => setMoveFilter(e.target.value)}
-                          placeholder="e.g. Rapid Spin"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
                         <label className="text-xs text-muted">Min points</label>
                         <input
                           className="input input-sm w-full"
@@ -1523,8 +1457,92 @@ export default function DraftHubPage() {
               const canPickNow = lobby.status === "InProgress" && isYourTurn && !picked;
 
               return viewMode === "classic" ? (
-                <DraftPoolClassicCard key={p.pokemonId} p={p} />
-              ) : (
+                <div
+                  key={p.pokemonId}
+                  className={`card draft-classic-card ${picked ? "opacity-70" : ""} ${pickedByYou ? "draft-classic-card--mine" : ""}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="draft-classic-sprite">
+                      {p.spriteUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.spriteUrl} alt={p.name} className="draft-classic-sprite-img" />
+                      ) : (
+                        <span className="text-xs text-muted">?</span>
+                      )}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="draft-classic-name truncate">
+                            {p.name} {p.dexNumber ? <span className="text-xs text-muted">#{p.dexNumber}</span> : null}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {(p.types ?? []).map((t) => (
+                              <TypePill key={t} t={t} />
+                            ))}
+                            {(p.roles ?? []).slice(0, 2).map((r) => (
+                              <span key={r} className="badge badge-soft text-xs">
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          className={`btn btn-sm btn-ghost ${watch ? "text-warning" : "text-muted"}`}
+                          onClick={() => onToggleWatch(p.pokemonId)}
+                          title={watch ? "Remove from watchlist" : "Add to watchlist"}
+                          type="button"
+                        >
+                          {watch ? "★" : "☆"}
+                        </button>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                        <StatLine label="HP" v={p.baseStats?.hp} />
+                        <StatLine label="ATK" v={p.baseStats?.atk} />
+                        <StatLine label="DEF" v={p.baseStats?.def} />
+                        <StatLine label="SpA" v={p.baseStats?.spa} />
+                        <StatLine label="SpD" v={p.baseStats?.spd} />
+                        <StatLine label="SPE" v={p.baseStats?.spe} />
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between">
+                        <div className="text-xs text-muted">
+                          Cost: <span className="text-foreground font-mono">{p.baseCost ?? "—"}</span>
+                          {picked ? (
+                            <span className="ml-2 badge badge-soft">
+                              Drafted by{" "}
+                              {p.pickedByTeamId ? teamNameById.get(p.pickedByTeamId) ?? `Team #${p.pickedByTeamId}` : "?"}
+                            </span>
+                          ) : null}
+                        </div>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => makePick(p.pokemonId)}
+                          disabled={!canPickNow}
+                          type="button"
+                          title={
+                            !canPickNow
+                              ? picked
+                                ? "Already drafted"
+                                : lobby.status !== "InProgress"
+                                  ? "Draft not in progress"
+                                  : !isYourTurn
+                                    ? "Not your turn"
+                                    : ""
+                              : "Make pick"
+                          }
+                        >
+                          Pick
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              
+) : (
   <div
     key={p.pokemonId}
     className={`card border ${picked ? "opacity-70" : ""} ${pickedByYou ? "border-brand" : "border-subtle"} draft-pool-card`}
@@ -1702,15 +1720,28 @@ export default function DraftHubPage() {
             </div>
 
             {analyserMode === "coverage" ? (
-              <div className="mt-3">
-                <div className="text-xs text-muted mb-2">Types you have (drafted by you).</div>
-                <div className="flex flex-wrap gap-1">
-                  {TYPES.map((t) => {
-                    const has = rosterTypeSet.has(t);
-                    return <TypePill key={t} t={t} dimmed={!has} />;
-                  })}
-                </div>
-              </div>
+
+<div className="mt-3 space-y-3">
+  <div>
+    <div className="text-xs text-muted mb-2">Types you have (drafted by you).</div>
+    <div className="flex flex-wrap gap-1">
+      {TYPES.filter((t) => rosterTypeSet.has(t)).length ? (
+        TYPES.filter((t) => rosterTypeSet.has(t)).map((t) => <TypePill key={t} t={t} />)
+      ) : (
+        <span className="text-xs text-muted">None yet.</span>
+      )}
+    </div>
+  </div>
+
+  <div>
+    <div className="text-xs text-muted mb-2">Types you&apos;re missing.</div>
+    <div className="flex flex-wrap gap-1">
+      {TYPES.filter((t) => !rosterTypeSet.has(t)).map((t) => (
+        <TypePill key={t} t={t} dimmed />
+      ))}
+    </div>
+  </div>
+</div>
             ) : (
               <div className="mt-3 space-y-3">
                 <div>

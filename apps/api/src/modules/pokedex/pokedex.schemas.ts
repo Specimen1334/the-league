@@ -45,8 +45,6 @@ export type PokedexBrowseQuery = {
   search?: string;
   type?: string;
   role?: string;
-  ability?: string;
-  move?: string;
   minCost?: number;
   maxCost?: number;
   /**

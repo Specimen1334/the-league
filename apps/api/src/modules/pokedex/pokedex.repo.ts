@@ -197,8 +197,6 @@ export const pokedexRepo = {
       search,
       type,
       role,
-      ability,
-      move,
       minCost,
       maxCost,
       leagueId,
@@ -226,49 +224,6 @@ export const pokedexRepo = {
       filters.push("e.roles_json LIKE @role");
       params.role = `%"${role}"%`;
     }
-
-    // Ability filter (name or key)
-    if (ability) {
-      const keys = pokedexRepo.resolveAbilityKeysBySearch(ability);
-      if (keys.length === 0) {
-        filters.push("0=1");
-      } else {
-        const conds = keys.map((_, i) =>
-          `EXISTS (
-            SELECT 1
-            FROM dex_pokemon_abilities pa
-            WHERE pa.pokemon_id = e.id
-              AND pa.ability_key = @abilityKey${i}
-          )`
-        );
-        filters.push(`(${conds.join(" OR ")})`);
-        keys.forEach((k, i) => {
-          (params as any)[`abilityKey${i}`] = k;
-        });
-      }
-    }
-
-    // Move filter (by move name or key)
-    if (move) {
-      const keys = pokedexRepo.resolveMoveKeysBySearch(move);
-      if (keys.length === 0) {
-        filters.push("0=1");
-      } else {
-        const likes = keys.map((_, i) => `l.moves_json LIKE @moveLike${i}`);
-        filters.push(
-          `EXISTS (
-            SELECT 1
-            FROM dex_pokemon_learnsets l
-            WHERE l.pokemon_id = e.id
-              AND (${likes.join(" OR ")})
-          )`
-        );
-        keys.forEach((k, i) => {
-          (params as any)[`moveLike${i}`] = `%"${k}"%`;
-        });
-      }
-    }
-
     if (minCost !== undefined) {
       filters.push("(COALESCE(o.override_cost, e.base_cost) >= @minCost)");
       params.minCost = minCost;
@@ -339,49 +294,6 @@ export const pokedexRepo = {
       countFilters.push("e.roles_json LIKE @role");
       countParams.role = `%%\"${role}\"%%`.replace(/%%/g, "%");
     }
-
-    // Ability filter (count)
-    if (ability) {
-      const keys = pokedexRepo.resolveAbilityKeysBySearch(ability);
-      if (keys.length === 0) {
-        countFilters.push("0=1");
-      } else {
-        const conds = keys.map((_, i) =>
-          `EXISTS (
-            SELECT 1
-            FROM dex_pokemon_abilities pa
-            WHERE pa.pokemon_id = e.id
-              AND pa.ability_key = @abilityKey${i}
-          )`
-        );
-        countFilters.push(`(${conds.join(" OR ")})`);
-        keys.forEach((k, i) => {
-          (countParams as any)[`abilityKey${i}`] = k;
-        });
-      }
-    }
-
-    // Move filter (count)
-    if (move) {
-      const keys = pokedexRepo.resolveMoveKeysBySearch(move);
-      if (keys.length === 0) {
-        countFilters.push("0=1");
-      } else {
-        const likes = keys.map((_, i) => `l.moves_json LIKE @moveLike${i}`);
-        countFilters.push(
-          `EXISTS (
-            SELECT 1
-            FROM dex_pokemon_learnsets l
-            WHERE l.pokemon_id = e.id
-              AND (${likes.join(" OR ")})
-          )`
-        );
-        keys.forEach((k, i) => {
-          (countParams as any)[`moveLike${i}`] = `%"${k}"%`;
-        });
-      }
-    }
-
     if (minCost !== undefined) {
       countFilters.push("(COALESCE(o.override_cost, e.base_cost) >= @minCost)");
       countParams.minCost = minCost;
@@ -573,145 +485,7 @@ export const pokedexRepo = {
       costVoteCount: r.costVoteCount,
       averageTargetCost: r.averageTargetCost
     }));
-  },
-
-  resolveAbilityKeysBySearch(search: string): string[] {
-    const q = `%${search.trim()}%`;
-    const rows = db
-      .prepare(
-        "SELECT key FROM dex_abilities WHERE name LIKE @q OR key LIKE @q LIMIT 50"
-      )
-      .all({ q }) as Array<{ key: string }>;
-    return rows.map((r) => r.key);
-  },
-
-  resolveMoveKeysBySearch(search: string): string[] {
-    const q = `%${search.trim()}%`;
-    const rows = db
-      .prepare(
-        "SELECT key FROM dex_moves WHERE name LIKE @q OR key LIKE @q LIMIT 50"
-      )
-      .all({ q }) as Array<{ key: string }>;
-    return rows.map((r) => r.key);
-  },
-
-  getAbilityNamesByPokemonIds(pokemonIds: number[]): Map<number, string[]> {
-    const out = new Map<number, string[]>();
-    if (pokemonIds.length === 0) return out;
-
-    const params: Record<string, any> = {};
-    const placeholders = pokemonIds
-      .map((id, i) => {
-        const k = `id${i}`;
-        params[k] = id;
-        return `@${k}`;
-      })
-      .join(",");
-
-    const rows = db
-      .prepare(
-        `SELECT pa.pokemon_id as pokemonId, a.name as abilityName
-         FROM dex_pokemon_abilities pa
-         JOIN dex_abilities a ON a.key = pa.ability_key
-         WHERE pa.pokemon_id IN (${placeholders})
-         ORDER BY pa.pokemon_id, pa.slot, pa.is_hidden`
-      )
-      .all(params) as Array<{ pokemonId: number; abilityName: string }>;
-
-    for (const r of rows) {
-      const arr = out.get(r.pokemonId) ?? [];
-      arr.push(r.abilityName);
-      out.set(r.pokemonId, arr);
-    }
-
-    return out;
-  },
-
-  getMoveNamesByPokemonIds(pokemonIds: number[]): Map<number, string[]> {
-    const out = new Map<number, string[]>();
-    if (pokemonIds.length === 0) return out;
-
-    const params: Record<string, any> = {};
-    const placeholders = pokemonIds
-      .map((id, i) => {
-        const k = `id${i}`;
-        params[k] = id;
-        return `@${k}`;
-      })
-      .join(",");
-
-    const learnsets = db
-      .prepare(
-        `SELECT pokemon_id as pokemonId, moves_json as movesJson
-         FROM dex_pokemon_learnsets
-         WHERE pokemon_id IN (${placeholders})`
-      )
-      .all(params) as Array<{ pokemonId: number; movesJson: string }>;
-
-    // Parse JSON and collect move keys per pokemon
-    const moveKeysByPokemon = new Map<number, Set<string>>();
-    const allKeys = new Set<string>();
-
-    for (const ls of learnsets) {
-      let obj: any;
-      try {
-        obj = JSON.parse(ls.movesJson ?? "{}") ?? {};
-      } catch {
-        obj = {};
-      }
-
-      const set = new Set<string>();
-      for (const v of Object.values(obj)) {
-        if (Array.isArray(v)) {
-          for (const key of v) {
-            if (typeof key === "string") {
-              set.add(key);
-              allKeys.add(key);
-            }
-          }
-        }
-      }
-      moveKeysByPokemon.set(ls.pokemonId, set);
-    }
-
-    if (allKeys.size === 0) {
-      for (const id of pokemonIds) out.set(id, []);
-      return out;
-    }
-
-    const moveParams: Record<string, any> = {};
-    const movePlaceholders = Array.from(allKeys)
-      .map((k, i) => {
-        const p = `m${i}`;
-        moveParams[p] = k;
-        return `@${p}`;
-      })
-      .join(",");
-
-    const moveRows = db
-      .prepare(
-        `SELECT key, name
-         FROM dex_moves
-         WHERE key IN (${movePlaceholders})`
-      )
-      .all(moveParams) as Array<{ key: string; name: string }>;
-
-    const nameByKey = new Map<string, string>(moveRows.map((r) => [r.key, r.name]));
-
-    for (const id of pokemonIds) {
-      const keys = moveKeysByPokemon.get(id) ?? new Set<string>();
-      const names: string[] = [];
-      for (const k of keys) {
-        const nm = nameByKey.get(k);
-        if (nm) names.push(nm);
-      }
-      names.sort((a, b) => a.localeCompare(b));
-      out.set(id, names);
-    }
-
-    return out;
-  },
-
+  }
 };
 
 /** Small JSON helpers – defensive against null/invalid stored data. */
