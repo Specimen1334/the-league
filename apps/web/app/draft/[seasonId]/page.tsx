@@ -1380,7 +1380,7 @@ export default function DraftHubPage() {
                     </div>
                   
 
-                    <<div className="draft-filter-grid">
+                    <div className="draft-filter-grid">
                       <div>
                         <label className="text-xs text-muted">Min cost</label>
                         <input
@@ -1431,6 +1431,7 @@ export default function DraftHubPage() {
                         </select>
                       </div>
                     </div>
+					
                     <div className="draft-filter-actions">
                       <label className="flex items-center gap-2 text-xs text-muted whitespace-nowrap">
                         <input
@@ -1525,7 +1526,7 @@ export default function DraftHubPage() {
                         <StatLine label="SpD" v={p.baseStats?.spd} />
                         <StatLine label="SPE" v={p.baseStats?.spe} />
                       </div>
-					  </div>
+					</div>
                   </div>
 
                       <div className="draft-classic-footer">
