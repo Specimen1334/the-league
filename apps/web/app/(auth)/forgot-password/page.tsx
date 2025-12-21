@@ -8,6 +8,7 @@ const API_BASE_URL =
 
 type ForgotResponse = {
   ok?: boolean;
+  message?: string;
   error?: string;
 };
 
@@ -46,17 +47,23 @@ export default function ForgotPasswordPage() {
         // ignore parse error
       }
 
-      if (!res.ok && data?.error) {
-        // If the backend wants to be vague for security, it can
-        // return a generic error here; we simply show whatever it gives us.
-        setError(data.error);
+if (!res.ok || data?.ok === false) {
+        const fallback =
+          res.statusText ||
+          "Unable to process your request. Please try again in a moment.";
+        const message =
+          data?.error ||
+          data?.message ||
+          fallback;
+        setError(message);
         return;
       }
-
+const message =
+        data?.message ??
+        "If an account exists for that username or email, you’ll receive reset instructions shortly.";
+		
       // Whether or not the user exists, we keep messaging generic.
-      setSuccessMessage(
-        "If an account exists for that username or email, you’ll receive reset instructions shortly."
-      );
+      setSuccessMessage(message);
     } catch (err) {
       console.error(err);
       setError("Network error. Please check your connection and try again.");

@@ -13,6 +13,16 @@ export type LoginBody = {
   captchaToken?: string;
 };
 
+export type ForgotPasswordBody = {
+  identifier: string;
+  captchaToken?: string;
+};
+
+export type ForgotPasswordResponse = {
+  ok: true;
+  message: string;
+};
+
 export type AuthUserResponse = {
   id: number;
   username: string;

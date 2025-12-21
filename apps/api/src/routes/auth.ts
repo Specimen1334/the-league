@@ -1,11 +1,16 @@
 // apps/api/src/routes/auth.ts
 import type { FastifyInstance } from "fastify";
 import { authService } from "../modules/auth/auth.service";
+import { forgotPasswordService } from "../modules/auth/forgot-password.service";
 import { verifyCaptchaToken } from "../modules/auth/captcha.service";
 import { sessionsRepo } from "../modules/auth/sessions.repo";
 import { toErrorResponse } from "../shared/errors";
-import type { RegisterBody, LoginBody, MeResponse } from "../modules/auth/auth.schemas";
-
+import type {
+  RegisterBody,
+  LoginBody,
+  MeResponse,
+  ForgotPasswordBody
+} from "../modules/auth/auth.schemas";
 const SESSION_COOKIE_NAME = "sid";
 
 export function registerAuthRoutes(app: FastifyInstance) {
@@ -68,6 +73,51 @@ export function registerAuthRoutes(app: FastifyInstance) {
     }
   });
 
+app.post<{ Body: ForgotPasswordBody }>("/auth/forgot-password", async (request, reply) => {
+    try {
+      const { body } = request;
+
+      const identifier = body.identifier?.trim();
+      if (!identifier) {
+        reply.code(400).send({
+          error: "BadRequest",
+          message: "Username or email is required"
+        });
+        return;
+      }
+      if (identifier.length < 3 || identifier.length > 254) {
+        reply.code(400).send({
+          error: "BadRequest",
+          message: "Username or email must be between 3 and 254 characters"
+        });
+        return;
+      }
+
+      const captchaOk = await verifyCaptchaToken(body.captchaToken);
+      if (!captchaOk) {
+        reply.code(400).send({
+          error: "BadRequest",
+          message: "Captcha verification failed"
+        });
+        return;
+      }
+
+      await forgotPasswordService.requestReset({
+        identifier,
+        ip: request.ip,
+        userAgent: request.headers["user-agent"]
+      });
+
+      const message =
+        "If an account exists for that username or email, you’ll receive reset instructions shortly.";
+
+      reply.send({ ok: true, message });
+    } catch (err) {
+      const { statusCode, payload } = toErrorResponse(err);
+      reply.code(statusCode).send(payload);
+    }
+  });
+  
   app.post("/auth/logout", async (request, reply) => {
     const sessionId = request.cookies?.[SESSION_COOKIE_NAME];
     if (sessionId) {
