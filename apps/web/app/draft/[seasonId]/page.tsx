@@ -297,6 +297,7 @@ export default function DraftHubPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [roleFilter, setRoleFilter] = useState<string>("");
+  const [moveFilter, setMoveFilter] = useState<string>("");
   const [minPoints, setMinPoints] = useState<string>("");
   const [maxPoints, setMaxPoints] = useState<string>("");
   const [hideDrafted, setHideDrafted] = useState(true);
@@ -465,6 +466,7 @@ export default function DraftHubPage() {
     if (search.trim()) qs.set("search", search.trim());
     if (typeFilter.trim()) qs.set("type", typeFilter.trim());
     if (roleFilter.trim()) qs.set("role", roleFilter.trim());
+	if (moveFilter.trim()) qs.set("move", moveFilter.trim());
 
     // We fetch a large list and do show-mode filtering client-side for snappy toggles.
     qs.set("page", "1");
@@ -477,7 +479,7 @@ export default function DraftHubPage() {
     const res = await apiFetchJson<DraftPoolResponse>(url);
     setPool(res);
     return res;
-  }, [roleFilter, search, seasonId, showMode, typeFilter]);
+  }, [moveFilter, roleFilter, search, seasonId, showMode, typeFilter]);
 
   // restore view mode
   useEffect(() => {
@@ -658,11 +660,12 @@ export default function DraftHubPage() {
     if (search.trim()) n++;
     if (typeFilter.trim()) n++;
     if (roleFilter.trim()) n++;
+	if (moveFilter.trim()) n++;
     if (minPoints.trim()) n++;
     if (maxPoints.trim()) n++;
     if (!hideDrafted) n++;
     return n;
-  }, [hideDrafted, maxPoints, minPoints, roleFilter, search, typeFilter]);
+  }, [hideDrafted, maxPoints, minPoints, moveFilter, roleFilter, search, typeFilter]);
 
   const draftedIds = useMemo(() => new Set<number>(state?.picks.map((p) => p.pokemonId) ?? []), [state?.picks]);
 
@@ -1336,41 +1339,50 @@ export default function DraftHubPage() {
                 </div>
 
                 {filtersOpen ? (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    <div>
-                      <label className="text-xs text-muted">Search</label>
-                      <input
-                        className="input input-sm w-full"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="e.g. Dragapult"
-                      />
+                <div className="space-y-3 draft-filters">
+                    <div className="draft-filter-grid">
+                      <div>
+                        <label className="text-xs text-muted">Search</label>
+                        <input
+                          className="input input-sm w-full"
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          placeholder="e.g. Dragapult"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted">Type</label>
+                        <input
+                          className="input input-sm w-full"
+                          value={typeFilter}
+                          onChange={(e) => setTypeFilter(e.target.value)}
+                          placeholder="e.g. Water"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted">Ability</label>
+                        <input
+                          className="input input-sm w-full"
+                          value={roleFilter}
+                          onChange={(e) => setRoleFilter(e.target.value)}
+                          placeholder="e.g. Levitate"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted">Move</label>
+                        <input
+                          className="input input-sm w-full"
+                          value={moveFilter}
+                          onChange={(e) => setMoveFilter(e.target.value)}
+                          placeholder="e.g. Stealth Rock"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-xs text-muted">Type</label>
-                      <input
-                        className="input input-sm w-full"
-                        value={typeFilter}
-                        onChange={(e) => setTypeFilter(e.target.value)}
-                        placeholder="e.g. Water"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted">Ability / Move</label>
-                      <input
-                        className="input input-sm w-full"
-                        value={roleFilter}
-                        onChange={(e) => setRoleFilter(e.target.value)}
-                        placeholder="e.g. Stealth Rock"
-                      />
-                    </div>
-                  </div>
+                  
 
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    <div>
-                      <label className="text-xs text-muted">Min / Max cost</label>
-                      <div className="mt-1 grid grid-cols-2 gap-2">
+                    <<div className="draft-filter-grid">
+                      <div>
+                        <label className="text-xs text-muted">Min cost</label>
                         <input
                           className="input input-sm w-full"
                           inputMode="numeric"
@@ -1378,6 +1390,9 @@ export default function DraftHubPage() {
                           onChange={(e) => setMinPoints(e.target.value)}
                           placeholder="Min"
                         />
+						</div>
+                      <div>
+                        <label className="text-xs text-muted">Max cost</label>
                         <input
                           className="input input-sm w-full"
                           inputMode="numeric"
@@ -1386,12 +1401,13 @@ export default function DraftHubPage() {
                           placeholder="Max"
                         />
                       </div>
-                    </div>
-
-                    <div>
-                      <label className="text-xs text-muted">Sort</label>
-                      <div className="mt-1 grid grid-cols-2 gap-2">
-                        <select className="input input-sm" value={sortKey} onChange={(e) => setSortKey(e.target.value as any)}>
+                   <div>
+                        <label className="text-xs text-muted">Sort</label>
+                        <select
+                          className="input input-sm w-full"
+                          value={sortKey}
+                          onChange={(e) => setSortKey(e.target.value as any)}
+                        >
                           <option value="dex">Dex</option>
                           <option value="name">Name</option>
                           <option value="pts">Points</option>
@@ -1402,16 +1418,20 @@ export default function DraftHubPage() {
                           <option value="spd">SpD</option>
                           <option value="spe">SPE</option>
                         </select>
-                        <select className="input input-sm" value={sortDir} onChange={(e) => setSortDir(e.target.value as any)}>
+                        </div>
+                      <div>
+                        <label className="text-xs text-muted">Direction</label>
+                        <select
+                          className="input input-sm w-full"
+                          value={sortDir}
+                          onChange={(e) => setSortDir(e.target.value as any)}
+                        >
                           <option value="asc">Asc</option>
                           <option value="desc">Desc</option>
                         </select>
                       </div>
                     </div>
-                    <div className="flex items-end justify-between gap-3">
-                      <button className="btn btn-sm flex-1 md:flex-none" type="button" onClick={loadPool}>
-                        Search
-                      </button>
+                    <div className="draft-filter-actions">
                       <label className="flex items-center gap-2 text-xs text-muted whitespace-nowrap">
                         <input
                           type="checkbox"
@@ -1421,10 +1441,12 @@ export default function DraftHubPage() {
                         />
                         Hide drafted
                       </label>
+					  <button className="btn btn-sm" type="button" onClick={loadPool}>
+                        Apply filters
+                      </button>
                     </div>
                   </div>
-                </div>
-              ) : null}
+               ) : null}
 
               <div className="flex flex-wrap gap-2">
                 <div className="join">

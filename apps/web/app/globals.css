@@ -1220,6 +1220,41 @@ textarea.input {
    Draft pool cards (flip view)
    Scoped with .draft-* classes to avoid impacting other pages.
    ───────────────────────────────────────────────────────────── */
+.draft-filters {
+  --draft-filter-gap: 0.75rem;
+}
+
+.draft-filter-grid {
+  display: grid;
+  gap: var(--draft-filter-gap);
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .draft-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .draft-filter-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.draft-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--draft-filter-gap);
+  flex-wrap: wrap;
+}
+
+.draft-filters .input,
+.draft-filters select,
+.draft-filters .btn {
+  min-height: 2.5rem;
+}
 
 .draft-pool-layout {
   display: grid;
