@@ -260,7 +260,8 @@ export default function DraftHubPage() {
     const beat = async () => {
       try {
         const res = await apiFetchJson<{ onlineUserIds: number[] }>(`/seasons/${seasonId}/draft/presence`, {
-          method: "POST"
+          method: "POST",
+          body: JSON.stringify({})
         });
         if (alive) setOnlineUserIds(Array.isArray(res.onlineUserIds) ? res.onlineUserIds : []);
       } catch {
