@@ -1301,40 +1301,43 @@ export default function DraftHubPage() {
         {/* Middle: Pool */}
         <div className="md:col-span-6 space-y-4">
           <div className="card p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div className="w-full">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">Player pool</div>
-                  <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm font-semibold">Pokémon pool</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className="btn btn-sm btn-outline" type="button" onClick={loadPool}>
+                    Refresh list
+                  </button>
+                  <button
+                    className="btn btn-sm btn-outline"
+                    type="button"
+                    onClick={() => setFiltersOpen((v) => !v)}
+                  >
+                    Filters
+                    {activeFilterCount ? <span className="ml-2 badge badge-soft">{activeFilterCount}</span> : null}
+                  </button>
+                  <div className="join">
                     <button
-                      className="btn btn-sm btn-outline"
+                      className={`btn btn-sm join-item ${viewMode === "flip" ? "btn" : "btn-outline"}`}
                       type="button"
-                      onClick={() => setFiltersOpen((v) => !v)}
+                      onClick={() => setViewMode("flip")}
                     >
-                      {filtersOpen ? "Hide filters" : "Show filters"}
-                      {activeFilterCount ? <span className="ml-2 badge badge-soft">{activeFilterCount}</span> : null}
+                      Flip
                     </button>
-                    <div className="join">
-                      <button
-                        className={`btn btn-sm join-item ${viewMode === "classic" ? "btn" : "btn-outline"}`}
-                        type="button"
-                        onClick={() => setViewMode("classic")}
-                      >
-                        Classic
-                      </button>
-                      <button
-                        className={`btn btn-sm join-item ${viewMode === "flip" ? "btn" : "btn-outline"}`}
-                        type="button"
-                        onClick={() => setViewMode("flip")}
-                      >
-                        Flip
-                      </button>
+                    <button
+                      className={`btn btn-sm join-item ${viewMode === "classic" ? "btn" : "btn-outline"}`}
+                      type="button"
+                      onClick={() => setViewMode("classic")}
+                    >
+                      Classic
+                    </button>
                     </div>
                   </div>
                 </div>
 
                 {filtersOpen ? (
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                     <div>
                       <label className="text-xs text-muted">Search</label>
                       <input
@@ -1344,52 +1347,72 @@ export default function DraftHubPage() {
                         placeholder="e.g. Dragapult"
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-muted">Type</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={typeFilter}
-                          onChange={(e) => setTypeFilter(e.target.value)}
-                          placeholder="e.g. Water"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted">Role</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={roleFilter}
-                          onChange={(e) => setRoleFilter(e.target.value)}
-                          placeholder="e.g. Wall"
-                        />
-                      </div>
+                    <div>
+                      <label className="text-xs text-muted">Type</label>
+                      <input
+                        className="input input-sm w-full"
+                        value={typeFilter}
+                        onChange={(e) => setTypeFilter(e.target.value)}
+                        placeholder="e.g. Water"
+                      />
                     </div>
+                    <div>
+                      <label className="text-xs text-muted">Ability / Move</label>
+                      <input
+                        className="input input-sm w-full"
+                        value={roleFilter}
+                        onChange={(e) => setRoleFilter(e.target.value)}
+                        placeholder="e.g. Stealth Rock"
+                      />
+                    </div>
+                  </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-muted">Min points</label>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div>
+                      <label className="text-xs text-muted">Min / Max cost</label>
+                      <div className="mt-1 grid grid-cols-2 gap-2">
                         <input
                           className="input input-sm w-full"
                           inputMode="numeric"
                           value={minPoints}
                           onChange={(e) => setMinPoints(e.target.value)}
-                          placeholder="e.g. 4"
+                          placeholder="Min"
                         />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted">Max points</label>
                         <input
                           className="input input-sm w-full"
                           inputMode="numeric"
                           value={maxPoints}
                           onChange={(e) => setMaxPoints(e.target.value)}
-                          placeholder="e.g. 12"
+                          placeholder="Max"
                         />
                       </div>
                     </div>
 
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 text-xs text-muted">
+                    <div>
+                      <label className="text-xs text-muted">Sort</label>
+                      <div className="mt-1 grid grid-cols-2 gap-2">
+                        <select className="input input-sm" value={sortKey} onChange={(e) => setSortKey(e.target.value as any)}>
+                          <option value="dex">Dex</option>
+                          <option value="name">Name</option>
+                          <option value="pts">Points</option>
+                          <option value="hp">HP</option>
+                          <option value="atk">ATK</option>
+                          <option value="def">DEF</option>
+                          <option value="spa">SpA</option>
+                          <option value="spd">SpD</option>
+                          <option value="spe">SPE</option>
+                        </select>
+                        <select className="input input-sm" value={sortDir} onChange={(e) => setSortDir(e.target.value as any)}>
+                          <option value="asc">Asc</option>
+                          <option value="desc">Desc</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex items-end justify-between gap-3">
+                      <button className="btn btn-sm flex-1 md:flex-none" type="button" onClick={loadPool}>
+                        Search
+                      </button>
+                      <label className="flex items-center gap-2 text-xs text-muted whitespace-nowrap">
                         <input
                           type="checkbox"
                           className="checkbox checkbox-sm"
@@ -1400,8 +1423,8 @@ export default function DraftHubPage() {
                       </label>
                     </div>
                   </div>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
 
               <div className="flex flex-wrap gap-2">
                 <div className="join">
@@ -1410,31 +1433,6 @@ export default function DraftHubPage() {
                   <button className={`btn btn-sm join-item ${showMode === "mine" ? "btn" : "btn-outline"}`} onClick={() => setShowMode("mine")}>Mine</button>
                   <button className={`btn btn-sm join-item ${showMode === "watchlist" ? "btn" : "btn-outline"}`} onClick={() => setShowMode("watchlist")}>Watchlist</button>
                 </div>
-
-                <div>
-                  <label className="text-xs text-muted">Sort</label>
-                  <div className="flex gap-2">
-                    <select className="input input-sm" value={sortKey} onChange={(e) => setSortKey(e.target.value as any)}>
-                      <option value="dex">Dex</option>
-                      <option value="name">Name</option>
-                      <option value="pts">Points</option>
-                      <option value="hp">HP</option>
-                      <option value="atk">ATK</option>
-                      <option value="def">DEF</option>
-                      <option value="spa">SpA</option>
-                      <option value="spd">SpD</option>
-                      <option value="spe">SPE</option>
-                    </select>
-                    <select className="input input-sm" value={sortDir} onChange={(e) => setSortDir(e.target.value as any)}>
-                      <option value="asc">Asc</option>
-                      <option value="desc">Desc</option>
-                    </select>
-                  </div>
-                </div>
-
-                <button className="btn btn-sm btn-outline" onClick={loadPool}>
-                  Refresh
-                </button>
               </div>
             </div>
           </div>
