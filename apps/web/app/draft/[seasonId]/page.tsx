@@ -175,7 +175,7 @@ function TypePill({ t, dimmed = false }: { t: string; dimmed?: boolean }) {
 
   return (
     <span
-      className="badge badge-outline"
+      className="type-pill"
       style={
         bg
           ? {
@@ -1688,98 +1688,102 @@ export default function DraftHubPage() {
             </div>
 
             <aside className="draft-pool-aside">
-<div className="card p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Watchlist</div>
-              <span className="badge badge-soft">{watchlistSet.size}</span>
-            </div>
-            <div className="mt-3 space-y-2">
-              {(pool?.items ?? [])
-                .filter((p) => watchlistSet.has(p.pokemonId) && !draftedIds.has(p.pokemonId))
-                .slice(0, 12)
-                .map((p) => (
-                  <button
-                    key={p.pokemonId}
-                    className="w-full flex items-center gap-2 rounded-lg border border-subtle px-3 py-2 hover:bg-muted text-left"
-                    onClick={() => onToggleWatch(p.pokemonId)}
-                    title="Toggle watch"
-                  >
-                    <span className="text-warning">★</span>
-                    <span className="text-sm font-medium truncate flex-1">{p.name}</span>
-                    <span className="text-xs text-muted font-mono">{p.baseCost ?? "—"}</span>
-                  </button>
-                ))}
-              {watchlistSet.size === 0 ? (
-                <div className="text-xs text-muted">Star Pokémon to add them here.</div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="card p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Team analyser</div>
-              <div className="join">
-                <button
-                  className={`btn btn-xs join-item ${analyserMode === "coverage" ? "btn" : "btn-outline"}`}
-                  onClick={() => setAnalyserMode("coverage")}
-                >
-                  Coverage
-                </button>
-                <button
-                  className={`btn btn-xs join-item ${analyserMode === "defense" ? "btn" : "btn-outline"}`}
-                  onClick={() => setAnalyserMode("defense")}
-                >
-                  Defense
-                </button>
-              </div>
-            </div>
-
-            {analyserMode === "coverage" ? (
-
-<div className="mt-3 space-y-3">
-  <div>
-    <div className="text-xs text-muted mb-2">Types you have (drafted by you).</div>
-    <div className="flex flex-wrap gap-1">
-      {TYPES.filter((t) => rosterTypeSet.has(t)).length ? (
-        TYPES.filter((t) => rosterTypeSet.has(t)).map((t) => <TypePill key={t} t={t} />)
-      ) : (
-        <span className="text-xs text-muted">None yet.</span>
-      )}
+<div className="draft-side-card">
+  <div className="draft-side-header">
+    <div className="draft-side-title">Watchlist</div>
+    <div className="draft-side-actions">
+      <span className="badge badge-soft">{watchlistSet.size}</span>
     </div>
   </div>
 
-  <div>
-    <div className="text-xs text-muted mb-2">Types you&apos;re missing.</div>
-    <div className="flex flex-wrap gap-1">
-      {TYPES.filter((t) => !rosterTypeSet.has(t)).map((t) => (
-        <TypePill key={t} t={t} dimmed />
+  <div className="draft-watchlist">
+    {(pool?.items ?? [])
+      .filter((p) => watchlistSet.has(p.pokemonId) && !draftedIds.has(p.pokemonId))
+      .slice(0, 12)
+      .map((p) => (
+        <button
+          key={p.pokemonId}
+          className="draft-watch-row"
+          onClick={() => onToggleWatch(p.pokemonId)}
+          title="Toggle watch"
+          type="button"
+        >
+          <span className="draft-watch-icon">★</span>
+          <span className="draft-watch-name">{p.name}</span>
+          <span className="draft-watch-cost">{p.baseCost ?? "—"}</span>
+        </button>
       ))}
-    </div>
+	  {watchlistSet.size === 0 ? (
+      <div className="draft-watch-empty text-xs text-muted">Star Pokémon to add them here.</div>
+    ) : null}
   </div>
 </div>
-            ) : (
-              <div className="mt-3 space-y-3">
-                <div>
-                  <div className="text-xs text-muted">Immune (at least one)</div>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {defSummary.immune.length ? defSummary.immune.map((t) => <span key={t} className="badge badge-success">{t}</span>) : <span className="text-xs text-muted">None</span>}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted">Resists (team worst-case &lt; 1×)</div>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {defSummary.resist.length ? defSummary.resist.map((t) => <span key={t} className="badge badge-outline">{t}</span>) : <span className="text-xs text-muted">None</span>}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted">Weak (team worst-case &gt; 1×)</div>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {defSummary.weak.length ? defSummary.weak.map((t) => <span key={t} className="badge badge-warn">{t}</span>) : <span className="text-xs text-muted">None</span>}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+
+<div className="draft-side-card">
+  <div className="draft-side-header">
+    <div className="draft-side-title">Team analyser</div>
+    <div className="draft-side-actions">
+      <div className="join">
+        <button
+          className={`btn btn-xs join-item ${analyserMode === "coverage" ? "btn" : "btn-outline"}`}
+          onClick={() => setAnalyserMode("coverage")}
+        >
+          Coverage
+        </button>
+        <button
+          className={`btn btn-xs join-item ${analyserMode === "defense" ? "btn" : "btn-outline"}`}
+          onClick={() => setAnalyserMode("defense")}
+        >
+          Defense
+        </button>
+      </div>
+    </div>
+  </div>
+  {analyserMode === "coverage" ? (
+    <div className="draft-side-group">
+      <div>
+        <div className="draft-side-label">Types you have (drafted by you).</div>
+        <div className="draft-type-pill-row">
+          {TYPES.filter((t) => rosterTypeSet.has(t)).length ? (
+            TYPES.filter((t) => rosterTypeSet.has(t)).map((t) => <TypePill key={t} t={t} />)
+          ) : (
+            <span className="text-xs text-muted">None yet.</span>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <div className="draft-side-label">Types you&apos;re missing.</div>
+        <div className="draft-type-pill-row">
+          {TYPES.filter((t) => !rosterTypeSet.has(t)).map((t) => (
+            <TypePill key={t} t={t} dimmed />
+          ))}
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div className="draft-side-group">
+      <div>
+        <div className="draft-side-label">Immune (at least one)</div>
+        <div className="draft-defense-row">
+          {defSummary.immune.length ? defSummary.immune.map((t) => <span key={t} className="draft-defense-chip draft-defense-chip--immune">{t}</span>) : <span className="text-xs text-muted">None</span>}
+        </div>
+      </div>
+      <div>
+        <div className="draft-side-label">Resists (team worst-case &lt; 1×)</div>
+        <div className="draft-defense-row">
+          {defSummary.resist.length ? defSummary.resist.map((t) => <span key={t} className="draft-defense-chip draft-defense-chip--resist">{t}</span>) : <span className="text-xs text-muted">None</span>}
+        </div>
+      </div>
+      <div>
+        <div className="draft-side-label">Weak (team worst-case &gt; 1×)</div>
+        <div className="draft-defense-row">
+          {defSummary.weak.length ? defSummary.weak.map((t) => <span key={t} className="draft-defense-chip draft-defense-chip--weak">{t}</span>) : <span className="text-xs text-muted">None</span>}
+        </div>
+      </div>
+    </div>
+  )}
+</div>
             </aside>
           </div>
         </div>
