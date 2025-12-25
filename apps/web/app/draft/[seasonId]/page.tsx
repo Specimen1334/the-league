@@ -1,2033 +1,1882 @@
+// apps/web/src/app/draft/[id]/room/page.tsx
+
 "use client";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useRouter, useParams } from "next/navigation";
+import { authHeaders, isLoggedIn, logout } from "@/lib/auth";
+import { motion, AnimatePresence } from "framer-motion";
+import { extractBaseAndFormFromName, baseFromSlug, formatDisplayName } from "@/kit/names";
+import { Sprite } from "@/kit/sprites";
+import { TypeBadge, Stat, Filters } from "@/kit/ui";
+import { useDraftClock, useIsMobile } from "@/kit/hooks";
+import {
+  fetchState, fetchLobby,
+  startDraftSvc, pauseDraftSvc, endDraftSvc, undoLastSvc,
+  saveSettingsSvc, saveOrderSvc, makePickSvc,
+  createLeagueFromDraftSvc, deleteDraftSvc,
+} from "@/kit/drafts";
+import type { DraftStatus, DraftCore, StateResp, OrderRow, PickRow } from "@/kit/types";
+import { TYPES, teamTypeSet, defenseSummary } from "@/kit/combat";
+import { API_BASE as API } from "@/kit/api";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-
-import { apiFetchJson, ApiError } from "@/lib/api";
-import { useToast } from "@/lib/toast";
-import { useAuth } from "@/lib/auth";
-import { PageHeader } from "@/components/PageHeader";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { EmptyState } from "@/components/EmptyState";
-import { TYPES, TYPE_COLORS, defenseSummary, normalizeType } from "@/lib/pokemon-types";
-
-type LeagueRole = "owner" | "commissioner" | "member" | string;
-
-type SeasonOverviewResponse = {
-  season: {
-    id: number;
-    leagueId: number | null;
-    name: string;
-    status: string;
-  };
-};
-
-
-type SeasonSettingsResponse = {
-  seasonId: number;
-  settings: {
-    draftPointCap: number;
-    allowTrades: boolean;
-    tradeDeadlineAt: string | null;
-  };
-};
-
-// API: GET /leagues/:leagueId returns LeagueDetail (flat), not nested under { league: ... }
-type LeagueDetailResponse = {
-  id: number;
+/* ========================================================
+   Types local to this page
+   ======================================================== */
+type PlayerCard = {
+  id?: number;
   name: string;
-  myRole: LeagueRole | null;
+  slug: string;
+  draftable: boolean;
+  points: number | null;
+
+  form_index?: number | null;
+  form_label?: string | null;
+  base_name?: string | null;
+  base_slug?: string | null;
+  gender?: "Male" | "Female" | null;
+
+  types?: string[];
+  abilities?: string[];
+  base_stats?: { hp?: number; atk?: number; def?: number; spa?: number; spd?: number; spe?: number };
+  moves?: string[];
 };
 
-type DraftStatus = "NotStarted" | "Lobby" | "InProgress" | "Paused" | "Completed";
-type DraftType = "Snake" | "Linear" | "Custom";
-
-type DraftLobbyParticipant = {
-  teamId: number;
-  teamName: string;
-  managerUserId: number;
-  managerDisplayName: string | null;
-  position: number;
-  isReady: boolean;
-  isYou: boolean;
+// What the lobby participants *may* have now that we’re username-first.
+// We’ll be defensive and accept multiple shapes (old/new).
+type Participant = {
+  team_id: number | null;
+  manager_user_id: number;
+  // New username-first fields (one or more may exist depending on API)
+  manager_username?: string | null;
+  username?: string | null;
+  participant_username?: string | null;
+  // Fallbacks
+  team_name?: string | null;
+  manager_display_name?: string | null;
 };
 
-type DraftLobbyResponse = {
-  seasonId: number;
-  status: DraftStatus;
-  type: DraftType;
-  startsAt: string | null;
-  pickTimerSeconds: number | null;
-  roundCount: number | null;
-  participants: DraftLobbyParticipant[];
-};
+/* ========================================================
+   Utils
+   ======================================================== */
+function titlify(s: string) {
+  return s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+function decodeMyUserId(): number | null {
+  try {
+    const tok = localStorage.getItem("token");
+    if (!tok) return null;
+    const [, payload] = tok.split(".");
+    if (!payload) return null;
+    const p = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    const sub = p?.sub;
+    return typeof sub === "number" ? sub : (sub ? Number(sub) : null);
+  } catch { return null; }
+}
 
-type DraftStateResponse = {
-  seasonId: number;
-  status: DraftStatus;
-  type: DraftType;
-  currentRound: number;
-  currentPickInRound: number;
-  overallPickNumber: number;
-  totalTeams: number;
-  teamOnTheClock: { teamId: number; teamName: string } | null;
-  timer: { pickTimerSeconds: number | null };
-  picks: {
-    id: number;
-    round: number;
-    pickInRound: number;
-    overallPickNumber: number;
-    teamId: number;
-    teamName: string | null;
-    pokemonId: number;
-    pokemonName: string | null;
-    spriteUrl: string | null;
-  }[];
-};
+// Username-first label: prefer usernames; fall back to team_name; else a generic.
+function labelForParticipant(p?: Participant | null): string {
+  if (!p) return "—";
+  const handle =
+    p.manager_username ||
+    p.username ||
+    p.participant_username ||
+    null;
+  if (handle && String(handle).trim()) return `@${String(handle).trim()}`;
+  if (p.team_name && String(p.team_name).trim()) return p.team_name!;
+  if (p.manager_display_name && String(p.manager_display_name).trim()) return p.manager_display_name!;
+  return `User ${p.manager_user_id}`;
+}
 
-type BaseStats = { hp: number; atk: number; def: number; spa: number; spd: number; spe: number };
-
-type DraftPoolItem = {
-  pokemonId: number;
-  dexNumber: number | null;
-  name: string;
-  spriteUrl: string | null;
-  baseStats: BaseStats | null;
-  types: string[];
-  roles: string[];
-  baseCost: number | null;
-  isPicked: boolean;
-  pickedByTeamId: number | null;
-};
-
-type DraftPoolResponse = {
-  seasonId: number;
-  items: DraftPoolItem[];
-  page: number;
-  limit: number;
-  total: number;
-};
-
-type DraftPokemonDetails = Pick<
-  DraftPoolItem,
-  "pokemonId" | "dexNumber" | "name" | "spriteUrl" | "baseStats" | "types" | "roles" | "baseCost"
->;
-
-type MyDraftResponse = {
-  seasonId: number;
-  teamId: number;
-  teamName: string;
-  picks: {
-    round: number;
-    pickInRound: number;
-    overallPickNumber: number;
-    pokemonId: number;
-  }[];
-  roster: DraftPokemonDetails[];
-  watchlistPokemonIds: number[];
-};
-
-type AdminDraftSettings = {
-  type: DraftType;
-  pickTimerSeconds: number | null;
-  roundCount: number | null;
-  startsAt: string | null;
-  draftPointCap: number;
-};
-
-function statusBadge(status: DraftStatus): { label: string; className: string } {
-  switch (status) {
-    case "NotStarted":
-      return { label: "Not started", className: "badge badge-soft" };
-    case "Lobby":
-      return { label: "Lobby", className: "badge badge-outline" };
-    case "InProgress":
-      return { label: "In progress", className: "badge badge-success" };
-    case "Paused":
-      return { label: "Paused", className: "badge badge-warn" };
-    case "Completed":
-      return { label: "Completed", className: "badge badge-soft" };
-    default:
-      return { label: status, className: "badge badge-soft" };
+/* ========================================================
+   Draft data services — thin wrappers per page needs
+   ======================================================== */
+async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+  if (!res.ok) {
+    const message = (data && (data.error || data.message)) || text || "Request failed";
+    throw new Error(message);
   }
+  return (data as T);
+}
+async function postAction(path: string, body?: any) {
+  return fetchJSON<any>(`${API}${path}`, {
+    method: "POST",
+    headers: { ...authHeaders(), ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 }
 
-function isServerErrorFromApi(e: unknown): boolean {
-  return e instanceof ApiError && e.status >= 500;
-}
+/* ========================================================
+   useDraftRoom — connection, state, actions
+   ======================================================== */
+function useDraftRoom(draftId: number) {
+  const [state, setState] = useState<StateResp | null>(null);
+  const [lobby, setLobby] = useState<{
+    draft: any;
+    participants: Participant[];
+    invites: { email: string; status: string }[];
+    status: DraftStatus;
+    is_commissioner: boolean;
+    presence: { userId: number; teamId: number | null }[];
+  } | null>(null);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-function TypePill({ t, dimmed = false }: { t: string; dimmed?: boolean }) {
-  const nt = normalizeType(t);
-  const bg = nt ? TYPE_COLORS[nt] : undefined;
+  const myUserId = useMemo(decodeMyUserId, []);
+  const myTeamRef = useRef<number | null>(null);
+  const [myTeamId, setMyTeamId] = useState<number | null>(null);
 
-  // Ensure readable text against the type color.
-  const textColor = useMemo(() => {
-    if (!bg) return undefined;
-    const hex = bg.replace("#", "");
-    if (hex.length !== 6) return undefined;
-    const r = parseInt(hex.slice(0, 2), 16) / 255;
-    const g = parseInt(hex.slice(2, 4), 16) / 255;
-    const b = parseInt(hex.slice(4, 6), 16) / 255;
-    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    return lum > 0.62 ? "#111827" : "#ffffff";
-  }, [bg]);
+  // mounted guard for async setState
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
-  return (
-    <span
-      className="type-pill"
-      style={
-        bg
-          ? {
-              backgroundColor: bg,
-              borderColor: bg,
-              color: textColor,
-              opacity: dimmed ? 0.35 : 1
-            }
-          : undefined
+  const guarded = useCallback(async <T,>(fn: () => Promise<T>) => {
+    try { return await fn(); }
+    catch (e: any) {
+      const m = String(e?.message || "").toLowerCase();
+      if (m.includes("unauthorized") || /401/.test(m)) {
+        logout();
+        // don’t navigate here — page will redirect on auth check in parent effect
       }
-    >
-      {nt ?? t}
-    </span>
+      throw e;
+    }
+  }, []);
+
+  const loadState = useCallback(async () => {
+    try { const j = await guarded(() => fetchState(draftId)); if (mountedRef.current) setState(j); }
+    catch (e: any) { if (mountedRef.current) setError(e?.message ?? String(e)); }
+  }, [draftId, guarded]);
+
+  const loadLobby = useCallback(async () => {
+    try { const j = await guarded(() => fetchLobby(draftId)); if (mountedRef.current) setLobby(j as any); }
+    catch (e: any) { if (mountedRef.current) setError(e?.message ?? String(e)); }
+  }, [draftId, guarded]);
+
+  // My team
+  useEffect(() => {
+    if (!lobby?.participants || !myUserId) return;
+    const mine = lobby.participants.find((p) => p.manager_user_id === myUserId);
+    const tid = mine?.team_id ?? null;
+    myTeamRef.current = tid;
+    setMyTeamId(tid);
+  }, [lobby?.participants, myUserId]);
+
+  // Presence heartbeat
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    let alive = true;
+    async function beat() {
+      try {
+        await fetch(`${API}/drafts/${draftId}/presence`, {
+          method: "POST",
+          headers: { ...authHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ teamId: myTeamRef.current }),
+        });
+      } catch {}
+      if (!alive) return;
+      t = setTimeout(beat, 5000);
+    }
+    if (draftId) beat();
+    return () => { alive = false; if (t) clearTimeout(t); };
+  }, [draftId]);
+
+  // SSE with auto-retry
+  useEffect(() => {
+    if (!draftId) return;
+    let es: EventSource | null = null;
+    let retry = 0;
+    const connect = () => {
+      es = new EventSource(`${API}/drafts/${draftId}/stream`, { withCredentials: true });
+      const reloadAll = () => { loadState(); loadLobby(); };
+      es.addEventListener("presence:update", () => setTimeout(loadLobby, 50));
+      es.addEventListener("lobby:update", () => setTimeout(loadLobby, 50));
+      es.addEventListener("draft:status", () => reloadAll());
+      es.addEventListener("state:update", () => setTimeout(loadState, 50));
+      es.addEventListener("draft:settings", () => setTimeout(loadState, 50));
+      es.onerror = () => {
+        es?.close();
+        if (!mountedRef.current) return;
+        const delay = Math.min(15000, 1000 * 2 ** retry++);
+        setTimeout(connect, delay);
+      };
+    };
+    connect();
+    return () => es?.close();
+  }, [draftId, loadState, loadLobby]);
+
+  // Initial load
+  useEffect(() => { loadState(); loadLobby(); }, [loadState, loadLobby]);
+
+  const isCommish = !!lobby?.is_commissioner;
+  const status: DraftStatus = state?.status ?? lobby?.status ?? "pending";
+
+  // Actions scaffold
+  const doAction = useCallback(async (fn: () => Promise<any>, okMsg = "Done.") => {
+    if (!mountedRef.current) return;
+    setMsg(""); setError(""); setLoading(true);
+    try {
+      await fn();
+      setMsg(okMsg);
+      await Promise.all([loadState(), loadLobby()]);
+    } catch (e: any) {
+      if (!mountedRef.current) return;
+      setError(e?.message ?? String(e));
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [loadState, loadLobby]);
+
+  const startDraft = useCallback(() => doAction(() => startDraftSvc(draftId)), [doAction, draftId]);
+  const pauseDraft = useCallback(() => doAction(() => pauseDraftSvc(draftId)), [doAction, draftId]);
+  const endDraft = useCallback(() => doAction(() => endDraftSvc(draftId)), [doAction, draftId]);
+  const undoLast = useCallback(() => doAction(() => undoLastSvc(draftId)), [doAction, draftId]);
+  const saveSettings = useCallback((patch: Partial<{ clock_seconds: number; points_cap: number | null; rounds: number; type: "snake" | "linear" }>) =>
+    doAction(() => saveSettingsSvc(draftId, patch)), [doAction, draftId]);
+  const saveOrder = useCallback((teamIds: number[]) =>
+    doAction(() => saveOrderSvc(draftId, teamIds)), [doAction, draftId]);
+  const makePick = useCallback(async (playerId: number, teamId: number | null) => {
+    await doAction(async () => {
+      const payload: any = { playerId, player_id: playerId, pokemon_id: playerId };
+      if (teamId != null) payload.team_id = teamId;
+      await makePickSvc(draftId, payload);
+    }, "Pick locked!");
+  }, [doAction, draftId]);
+
+  const createLeagueFromDraft = useCallback((leagueName: string) =>
+    doAction(() => createLeagueFromDraftSvc(draftId, leagueName), "League created and draft imported."), [doAction, draftId]);
+
+  const deleteDraft = useCallback(() =>
+    doAction(() => deleteDraftSvc(draftId), "Draft deleted."), [doAction, draftId]);
+
+  // Username-first display for a team slot
+  const teamLabel = useCallback((teamId?: number | null) => {
+    if (!teamId || !lobby?.participants) return "—";
+    const p = lobby.participants.find((x) => x.team_id === teamId) || null;
+    return labelForParticipant(p);
+  }, [lobby?.participants]);
+
+  // Username-only label for the next-on-clock area (if teamId not present)
+  const userLabelByUserId = useCallback((userId?: number | null) => {
+    if (!userId || !lobby?.participants) return "—";
+    const p = lobby.participants.find((x) => x.manager_user_id === userId) || null;
+    return labelForParticipant(p);
+  }, [lobby?.participants]);
+
+  return {
+    state, lobby, status, isCommish,
+    msg, error, loading, setError, setMsg,
+    myTeamId, teamLabel, userLabelByUserId,
+    loadState, loadLobby,
+    startDraft, pauseDraft, endDraft, undoLast, saveSettings, saveOrder, makePick,
+    createLeagueFromDraft, deleteDraft,
+  };
+}
+
+/* ========================================================
+   usePlayerPool — search, filters, sort, watch, flip
+   ======================================================== */
+function usePlayerPool(draftId: number, state: StateResp | null) {
+  // Filters
+  const [filters, setFilters] = useState({
+    q: "", type: "", ability: "", move: "",
+    minPoints: "", maxPoints: "",
+    sortKey: "id" as "id" | "pts" | "hp" | "atk" | "def" | "spa" | "spd" | "spe",
+    sortDir: "asc" as "asc" | "desc",
+    hideDrafted: true,
+  });
+  const [loadingPlayers, setLoadingPlayers] = useState(false);
+
+  // Players
+  const [players, setPlayers] = useState<PlayerCard[]>([]);
+  const playersById = useMemo(() => {
+    const map = new Map<number, PlayerCard>();
+    for (const p of players) if (p.id != null) map.set(p.id, p);
+    return map;
+  }, [players]);
+
+  // Drafted IDs
+  const draftedIds = useMemo(
+    () => new Set((state?.picks ?? []).map((p) => p.player_id).filter(Boolean) as number[]),
+    [state?.picks]
+  );
+
+  // Search helpers
+  const coalesce = <T,>(...vals: T[]): T | undefined => vals.find((v) => v !== undefined && v !== null) as any;
+  function unslug(s: string): string {
+    if (!s) return "";
+    return s.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  const rawId = (p: any) => p.id ?? p.player_id ?? p.pokemon_id ?? undefined;
+  const rawSlug = (p: any) => p.slug ?? p.player_slug ?? String(rawId(p) ?? "");
+
+  // Debounced + abortable search to avoid races
+  const searchAbort = useRef<AbortController | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const searchPlayers = useCallback(async () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      searchAbort.current?.abort();
+      const ac = new AbortController();
+      searchAbort.current = ac;
+
+      const qs = new URLSearchParams();
+      if (filters.q) qs.set("q", filters.q);
+      if (filters.type) qs.set("type", filters.type);
+      if (filters.ability) qs.set("ability", filters.ability);
+      if (filters.move) qs.set("move", filters.move);
+      if (filters.minPoints) qs.set("minPoints", String(filters.minPoints));
+      if (filters.maxPoints) qs.set("maxPoints", String(filters.maxPoints));
+      qs.set("draftableOnly", "1");
+
+      setLoadingPlayers(true);
+      try {
+        const res = await fetch(`${API}/players?${qs.toString()}`, {
+          headers: { ...authHeaders() },
+          signal: ac.signal,
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j?.error || "Search failed");
+
+        const list = (j.players as any[]).map((p) => {
+          const id = rawId(p);
+          const slug = rawSlug(p);
+
+          const providedBase = coalesce(p.base_name, p.base_species, p.base) ?? null;
+          const providedFormLabel = coalesce(p.form_label, p.form_name, p.variant, p.form) ?? null;
+          const providedFormIndex = coalesce(p.form_index, p.form_number, p.sprite_index, p.variant_index, p.formId) ?? null;
+          const providedGender = coalesce(p.gender, p.sex) ?? null;
+
+          const rawName =
+            p.name ?? p.player_name ?? p.display_name ?? p.full_name ?? p.species ?? p.pokemon ?? unslug(slug);
+
+          const { base: inferredBase, form: inferredForm } = extractBaseAndFormFromName(rawName);
+          const baseName = (providedBase as string | null) ?? inferredBase;
+          const formLabel = (providedFormLabel as string | null) ?? inferredForm;
+
+          const rawPts = p.points ?? p.cost ?? p.value;
+          const pts = rawPts == null
+            ? NaN
+            : Number(typeof rawPts === "string" ? rawPts.trim() : rawPts);
+
+          return {
+            ...p,
+            id,
+            slug,
+            name: rawName,
+            base_name: baseName,
+            base_slug: (baseName || "").toLowerCase().replace(/\s+/g, "-"),
+            form_label: formLabel,
+            form_index: providedFormIndex != null ? Number(providedFormIndex) : null,
+            gender: providedGender,
+
+            points: Number.isFinite(pts) ? pts : null,
+            types: p.types ?? p.type ?? p.type_list ?? [],
+            abilities: p.abilities ?? p.ability_list ?? p.ability ?? [],
+            base_stats:
+              p.base_stats ??
+              p.stats ?? {
+                hp: p.hp, atk: p.atk, def: p.def,
+                spa: p.spa ?? p.spA, spd: p.spd ?? p.spD, spe: p.spe,
+              },
+          } as PlayerCard;
+        });
+
+        setPlayers(list);
+      } catch (e: any) {
+        if (e?.name !== "AbortError") console.error(e);
+      } finally {
+        setLoadingPlayers(false);
+      }
+    }, 200);
+  }, [filters]);
+
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchAbort.current?.abort();
+  }, []);
+
+  useEffect(() => { searchPlayers(); /* mount */ }, []); // eslint-disable-line
+
+  // Watchlist
+  const WATCH_KEY = `draft:${draftId}:watchlist`;
+  const [watch, setWatch] = useState<Set<number>>(() => {
+    try { const raw = localStorage.getItem(WATCH_KEY); return new Set<number>(raw ? JSON.parse(raw) : []); }
+    catch { return new Set<number>(); }
+  });
+  function toggleWatch(id?: number) {
+    if (id == null) return;
+    setWatch((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem(WATCH_KEY, JSON.stringify(Array.from(next))); } catch {}
+      return next;
+    });
+  }
+  const watchedPlayers = useMemo(() => {
+    const arr: PlayerCard[] = [];
+    watch.forEach((id) => { const p = playersById.get(id); if (p) arr.push(p); });
+    arr.sort((a, b) => {
+      const ad = draftedIds.has(a.id!); const bd = draftedIds.has(b.id!);
+      if (ad !== bd) return ad ? 1 : -1;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    return arr;
+  }, [watch, playersById, draftedIds]);
+
+  // Sorting + filtering
+  const sortedFilteredPlayers = useMemo(() => {
+    const minP = filters.minPoints === "" ? -Infinity : Number(filters.minPoints);
+    const maxP = filters.maxPoints === "" ?  Infinity : Number(filters.maxPoints);
+
+    const base = players
+      .filter((p) => !filters.hideDrafted || !draftedIds.has(p.id ?? -1))
+      .filter((p) => {
+        if (filters.minPoints === "" && filters.maxPoints === "") return true;
+        const ptsRaw = p.points;
+        const pts = typeof ptsRaw === "number" ? ptsRaw : Number(ptsRaw);
+        return Number.isFinite(pts) && pts >= minP && pts <= maxP;
+      });
+
+    const dir = filters.sortDir === "asc" ? 1 : -1;
+
+    const getVal = (p: PlayerCard): number | null => {
+      if (filters.sortKey === "id") return p.id ?? null;
+      if (filters.sortKey === "pts") {
+        const ptsRaw = p.points;
+        const pts = typeof ptsRaw === "number" ? ptsRaw : Number(ptsRaw);
+        return Number.isFinite(pts) ? pts : null;
+      }
+      const s = p.base_stats || {};
+      switch (filters.sortKey) {
+        case "hp":  return s.hp  ?? null;
+        case "atk": return s.atk ?? null;
+        case "def": return s.def ?? null;
+        case "spa": return s.spa ?? null;
+        case "spd": return s.spd ?? null;
+        case "spe": return s.spe ?? null;
+        default:    return null;
+      }
+    };
+
+    return base.slice().sort((a, b) => {
+      const va = getVal(a), vb = getVal(b);
+      const am = va == null, bm = vb == null;
+      if (am !== bm) return am ? 1 : -1; // nulls/unknowns last
+      return ((va as number) - (vb as number)) * dir;
+    });
+  }, [
+    players,
+    filters.hideDrafted,
+    filters.minPoints,
+    filters.maxPoints,
+    filters.sortKey,
+    filters.sortDir,
+    draftedIds,
+  ]);
+
+  // Flip + sheet
+  const [flipped, setFlipped] = useState<Set<number>>(new Set());
+  const [sheetFor, setSheetFor] = useState<number | null>(null);
+  function toggleFlip(id?: number) {
+    if (id == null) return;
+    setFlipped((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  // View mode & filters collapsed
+  const VIEW_KEY = `draft:${draftId}:poolView`;
+  const [viewMode, setViewMode] = useState<"flip" | "classic">(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_KEY);
+      return (saved === "classic" || saved === "flip") ? (saved as any) : "flip";
+    } catch { return "flip"; }
+  });
+  useEffect(() => { try { localStorage.setItem(VIEW_KEY, viewMode); } catch {} }, [viewMode, VIEW_KEY]);
+
+  const FILTERS_COLLAPSED_KEY = `draft:${draftId}:filtersCollapsed`;
+  const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(() => {
+    try { const saved = localStorage.getItem(FILTERS_COLLAPSED_KEY); return saved ? saved === "1" : false; }
+    catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem(FILTERS_COLLAPSED_KEY, filtersCollapsed ? "1" : "0"); } catch {} }, [filtersCollapsed, FILTERS_COLLAPSED_KEY]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (filters.q) n++;
+    if (filters.type) n++;
+    if (filters.ability) n++;
+    if (filters.move) n++;
+    if (filters.minPoints) n++;
+    if (filters.maxPoints) n++;
+    return n;
+  }, [filters.q, filters.type, filters.ability, filters.move, filters.minPoints, filters.maxPoints]);
+
+  // Reset watch/flip when moving rooms
+  useEffect(() => {
+    try { const raw = localStorage.getItem(WATCH_KEY); setWatch(new Set(raw ? JSON.parse(raw) : [])); } catch {}
+    setFlipped(new Set());
+  }, [draftId]);
+
+  return {
+    // data
+    filters, setFilters, loadingPlayers, searchPlayers,
+    playersById, sortedFilteredPlayers,
+    draftedIds,
+    // watchlist
+    watch, toggleWatch, watchedPlayers,
+    // flip/sheet/view
+    flipped, toggleFlip, sheetFor, setSheetFor,
+    viewMode, setViewMode,
+    filtersCollapsed, setFiltersCollapsed, activeFilterCount,
+  };
+}
+
+/* ========================================================
+   Small page-local component: labeled field wrapper
+   ======================================================== */
+function L({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="grid gap-1 text-sm">
+      <span className="opacity-80">{label}</span>
+      {children}
+    </label>
   );
 }
 
-function StatLine({ label, v }: { label: string; v: number | null | undefined }) {
-  const val = typeof v === "number" ? v : 0;
+function CoveragePanel({ myTeamPlayers }: { myTeamPlayers: PlayerCard[] }) {
+  const [mode, setMode] = useState<"team" | "defense">("team");
+
+  const have = useMemo(() => teamTypeSet(myTeamPlayers), [myTeamPlayers]);
+  const missing = useMemo(() => TYPES.filter(t => !have.has(t)), [have]);
+  const defenseRows = useMemo(() => defenseSummary(myTeamPlayers), [myTeamPlayers]);
+
   return (
-    <div className="draft-stat-row">
-      <span className="draft-stat-label">{label}</span>
-      <span className="draft-stat-val">{val}</span>
+    <div className="rounded-2xl p-3 bg-black/30 border border-white/5 h-full grid grid-rows-[auto_1fr] gap-2">
+      <div className="flex items-center gap-2">
+        <h4 className="font-semibold">Coverage</h4>
+        <div className="ml-auto rounded-xl bg-white/10 p-1">
+          <button
+            className={`px-3 py-1 rounded-lg text-sm ${mode === "team" ? "bg-secondary text-white" : "text-white/80 hover:bg-white/15"}`}
+            onClick={() => setMode("team")}
+          >Types you have</button>
+          <button
+            className={`ml-1 px-3 py-1 rounded-lg text-sm ${mode === "defense" ? "bg-secondary text-white" : "text-white/80 hover:bg-white/15"}`}
+            onClick={() => setMode("defense")}
+          >Defense</button>
+        </div>
+      </div>
+
+      {mode === "team" ? (
+        <div className="grid gap-3 overflow-auto pr-1">
+          <div>
+            <div className="text-xs opacity-75 mb-1">You have</div>
+            <div className="flex flex-wrap gap-1">
+              {Array.from(have).length
+                ? Array.from(have).map(t => <TypeBadge key={`have-${t}`} t={t} />)
+                : <span className="text-sm opacity-70">No types yet.</span>}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs opacity-75 mb-1">You lack</div>
+            <div className="flex flex-wrap gap-1">
+              {missing.length
+                ? missing.map(t => <div key={`lack-${t}`} className="opacity-60"><TypeBadge t={t} /></div>)
+                : <span className="text-sm opacity-70">You cover every type.</span>}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="overflow-auto pr-1">
+          <div className="text-xs opacity-75 mb-2">Incoming attack types → team response</div>
+          <div className="grid gap-1">
+            {defenseRows.map(({ att, weak, neutral, resist, immune }) => (
+              <div key={att} className="flex items-center gap-2 rounded-lg bg-white/5 border border-white/10 px-2 py-1">
+                <div className="shrink-0"><TypeBadge t={att} /></div>
+                <div className="ml-auto flex items-center gap-2 text-[12px]">
+                  <span className="px-2 py-0.5 rounded bg-red-500/30 border border-red-500/40">{weak} weak</span>
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/30 border border-emerald-500/40">{resist} resist</span>
+                  <span className="px-2 py-0.5 rounded bg-blue-500/30 border border-blue-500/40">{immune} immune</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {myTeamPlayers.length === 0 && <div className="mt-2 text-sm opacity-70">No drafted Pokémon yet.</div>}
+        </div>
+      )}
     </div>
   );
 }
 
-function useIsMobile(breakpointPx = 768): boolean {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpointPx}px)`);
-    const onChange = () => setIsMobile(mq.matches);
-    onChange();
-    mq.addEventListener?.("change", onChange);
-    return () => mq.removeEventListener?.("change", onChange);
-  }, [breakpointPx]);
-  return isMobile;
+/* ========================================================
+   Order editor, Details sheet, Settings panel, End modal
+   ======================================================== */
+function PresenceList({
+  presence, participants,
+}: {
+  presence: { userId: number; teamId: number | null }[];
+  participants: Participant[];
+}) {
+  const activeTeamIds = new Set(presence.map((p) => p.teamId).filter(Boolean) as number[]);
+  const byUserId = new Map<number, Participant>();
+  participants.forEach((p) => byUserId.set(p.manager_user_id, p));
+  return (
+    <div className="mt-2">
+      <h4 className="text-sm font-semibold mb-1">Presence</h4>
+      <div className="grid gap-1">
+        {participants.map((p) => {
+          const on = p.team_id ? activeTeamIds.has(p.team_id) : false;
+          const label = labelForParticipant(p);
+          return (
+            <div
+              key={p.manager_user_id}
+              className={`px-3 py-2 rounded-xl text-sm flex items-center gap-2 ${
+                on ? "bg-success text-black" : "bg-white/10 text-white/80 border border-white/5"
+              }`}
+              title={on ? "Online" : "Offline"}
+            >
+              <span className={`inline-block h-2 w-2 rounded-full ${on ? "bg-emerald-700" : "bg-white/40"}`} />
+              <span className="font-medium">{label}</span>
+            </div>
+          );
+        })}
+        {participants.length === 0 && <div className="opacity-80 text-sm">No participants yet.</div>}
+      </div>
+    </div>
+  );
 }
 
-function readLocal<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
+function OrderEditor({
+  participants, currentOrder, onSave, onClose,
+}: {
+  participants: Participant[];
+  currentOrder: number[];
+  onSave: (teamIds: number[]) => Promise<void>;
+  onClose: () => void;
+}) {
+  const lobbyTeams = participants.filter((p) => p.team_id != null) as Required<Pick<Participant, "team_id">> & Participant[];
+  const initialSeq = (currentOrder && currentOrder.length ? currentOrder : lobbyTeams.map((p: any) => p.team_id)).filter(Boolean) as number[];
+  const [seq, setSeq] = useState<number[]>(initialSeq);
 
-function writeLocal<T>(key: string, val: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(val));
-  } catch {
-    // ignore
-  }
-}
-
-export default function DraftHubPage() {
-  const params = useParams<{ seasonId: string }>();
-  const seasonId = Number(params?.seasonId);
-
-  const toast = useToast();
-  const auth = useAuth();
-
-  // Note: auth gating is handled globally in the new app.
-
-  // Presence heartbeat (keeps an "online" list like the old room).
   useEffect(() => {
-    if (!auth.user) {
-      setOnlineUserIds([]);
-      return;
-    }
-    if (!Number.isFinite(seasonId) || seasonId <= 0) {
-      setOnlineUserIds([]);
-      return;
-    }
-
-    let alive = true;
-    let t: ReturnType<typeof setTimeout> | null = null;
-
-    const beat = async () => {
-      try {
-        const res = await apiFetchJson<{ onlineUserIds: number[] }>(`/seasons/${seasonId}/draft/presence`, {
-          method: "POST"
-        });
-        if (alive) setOnlineUserIds(Array.isArray(res.onlineUserIds) ? res.onlineUserIds : []);
-      } catch {
-        // ignore transient errors
-      } finally {
-        if (!alive) return;
-        t = setTimeout(beat, 5000);
-      }
-    };
-
-    void beat();
-    return () => {
-      alive = false;
-      if (t) clearTimeout(t);
-    };
-  }, [auth.user, seasonId]);
-
-  const [leagueId, setLeagueId] = useState<number | null>(null);
-  const [leagueName, setLeagueName] = useState<string | null>(null);
-  const [myRole, setMyRole] = useState<LeagueRole | null>(null);
-  const [seasonName, setSeasonName] = useState<string | null>(null);
-
-  const [lobby, setLobby] = useState<DraftLobbyResponse | null>(null);
-  const [state, setState] = useState<DraftStateResponse | null>(null);
-  const [pool, setPool] = useState<DraftPoolResponse | null>(null);
-  const [my, setMy] = useState<MyDraftResponse | null>(null);
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // presence
-  const [onlineUserIds, setOnlineUserIds] = useState<number[]>([]);
-
-  // pool filters (parity with old draft room where possible)
-  const [filtersOpen, setFiltersOpen] = useState(true);
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("");
-  const [roleFilter, setRoleFilter] = useState<string>("");
-  const [moveFilter, setMoveFilter] = useState<string>("");
-  const [minPoints, setMinPoints] = useState<string>("");
-  const [maxPoints, setMaxPoints] = useState<string>("");
-  const [hideDrafted, setHideDrafted] = useState(true);
-  const [sortKey, setSortKey] = useState<"name" | "dex" | "pts" | "hp" | "atk" | "def" | "spa" | "spd" | "spe">("dex");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [showMode, setShowMode] = useState<"available" | "drafted" | "mine" | "watchlist">("available");
-
-  // card view (classic vs flip) + per-card flip state
-  const VIEW_KEY = useMemo(() => `draft:${seasonId}:viewMode`, [seasonId]);
-  const [viewMode, setViewMode] = useState<"classic" | "flip">("classic");
-  const [flipped, setFlipped] = useState<Set<number>>(() => new Set());
-  const [sheetFor, setSheetFor] = useState<DraftPoolItem | null>(null);
-  const [sheetSide, setSheetSide] = useState<"front" | "back">("front");
-  const isMobile = useIsMobile();
-
-  // board filter (helps mimic old room's "board" focus)
-  const [boardMode, setBoardMode] = useState<"all" | "mine">("all");
-  const boardScrollRef = useRef<HTMLDivElement | null>(null);
-
-  // board style
-  const [boardStyle, setBoardStyle] = useState<"grid" | "table">("grid");
-
-  // analyzer
-  const [analyserMode, setAnalyserMode] = useState<"coverage" | "defense">("coverage");
-
-  // modals
-  const [confirmEndOpen, setConfirmEndOpen] = useState(false);
-  const [confirmUndoOpen, setConfirmUndoOpen] = useState(false);
-  const [forcePickOpen, setForcePickOpen] = useState(false);
-
-  // commissioner action state
-  const [adminBusy, setAdminBusy] = useState<null | "start" | "pause" | "resume" | "end" | "undo" | "force">(null);
-  const [forcePickTeamId, setForcePickTeamId] = useState<number | "">("");
-  const [forcePickPokemonId, setForcePickPokemonId] = useState<number | "">("");
-
-  // join team (when user has no team yet)
-  const [joinTeamName, setJoinTeamName] = useState("");
-  const [joinBusy, setJoinBusy] = useState(false);
-
-  // reroll order (commissioner)
-  const [rerollBusy, setRerollBusy] = useState(false);
-
-  // commissioner draft settings
-  const [settings, setSettings] = useState<AdminDraftSettings>({
-    type: "Snake",
-    pickTimerSeconds: 60,
-    roundCount: null,
-    startsAt: null,
-    draftPointCap: 0
-  });
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const settingsTouched = useRef(false);
-
-  const canManage = myRole === "owner" || myRole === "commissioner";
-  const settingsLocked = lobby?.status === "InProgress" || lobby?.status === "Paused" || lobby?.status === "Completed";
-  const canEditSettings = canManage && !settingsLocked;
-
-  const youParticipant = useMemo(() => lobby?.participants.find((p) => p.isYou) ?? null, [lobby?.participants]);
-
-  const isYourTurn = useMemo(() => {
-    if (!state?.teamOnTheClock || !youParticipant) return false;
-    return state.teamOnTheClock.teamId === youParticipant.teamId;
-  }, [state?.teamOnTheClock, youParticipant]);
-
-  const watchlistSet = useMemo(() => new Set<number>(my?.watchlistPokemonIds ?? []), [my?.watchlistPokemonIds]);
-
-  const teamNameById = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const p of lobby?.participants ?? []) m.set(p.teamId, p.teamName);
-    return m;
-  }, [lobby?.participants]);
-
-  const allReady = useMemo(() => {
-    const parts = lobby?.participants ?? [];
-    return parts.length > 0 && parts.every((p) => p.isReady);
-  }, [lobby?.participants]);
-
-  const canStartDraft = useMemo(() => {
-    if (!canManage) return false;
-    if (!lobby) return false;
-    if (lobby.status !== "Lobby" && lobby.status !== "NotStarted") return false;
-    const roundsOk = typeof lobby.roundCount === "number" && lobby.roundCount >= 1;
-    const timerOk = typeof lobby.pickTimerSeconds === "number" && lobby.pickTimerSeconds >= 5;
-    return roundsOk && timerOk && allReady;
-  }, [allReady, canManage, lobby]);
-
-	// season-level settings (e.g. draft point cap)
-	const [seasonSettings, setSeasonSettings] = useState<SeasonSettingsResponse | null>(null);
-
-	const loadSeasonSettings = useCallback(async () => {
-		const res = await apiFetchJson<SeasonSettingsResponse>(`/seasons/${seasonId}/settings`);
-		setSeasonSettings(res);
-		return res;
-	}, [seasonId]);
-
-  // init settings from lobby snapshot
-  useEffect(() => {
-    if (!lobby || settingsTouched.current) return;
-    setSettings({
-      type: lobby.type,
-      pickTimerSeconds: lobby.pickTimerSeconds,
-      roundCount: lobby.roundCount,
-      startsAt: lobby.startsAt,
-      // season-scoped setting
-      draftPointCap: seasonSettings?.settings.draftPointCap ?? 0
-    });
+    const ids = new Set(seq);
+    const missing = lobbyTeams.map((t: any) => t.team_id).filter((id) => !ids.has(id));
+    if (missing.length) setSeq((s) => [...s, ...missing]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lobby, seasonSettings]);
+  }, [participants.length]);
 
-	// metadata
-
-	useEffect(() => {
-    let cancelled = false;
-    async function loadMeta() {
-      if (!Number.isFinite(seasonId) || seasonId <= 0) return;
-      try {
-        const ov = await apiFetchJson<SeasonOverviewResponse>(`/seasons/${seasonId}`);
-        if (cancelled) return;
-        setSeasonName(ov.season.name);
-        setLeagueId(ov.season.leagueId);
-
-				// load season settings in parallel with other metadata so draft UI reflects server truth
-				// (notably: draftPointCap)
-				await loadSeasonSettings();
-
-        if (ov.season.leagueId) {
-          const lv = await apiFetchJson<LeagueDetailResponse>(`/leagues/${ov.season.leagueId}`);
-          if (cancelled) return;
-          setLeagueName(lv.name);
-          setMyRole(lv.myRole);
-        } else {
-          setLeagueName(null);
-          setMyRole(null);
-        }
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Failed to load season");
-      }
-    }
-    loadMeta();
-    return () => {
-      cancelled = true;
-    };
-  }, [seasonId, loadSeasonSettings]);
-
-  const loadLobby = useCallback(async () => {
-    const res = await apiFetchJson<DraftLobbyResponse>(`/seasons/${seasonId}/draft/lobby`);
-    setLobby(res);
-    return res;
-  }, [seasonId]);
-
-  const loadState = useCallback(async () => {
-    const res = await apiFetchJson<DraftStateResponse>(`/seasons/${seasonId}/draft/state`);
-    setState(res);
-    return res;
-  }, [seasonId]);
-
-  const loadMy = useCallback(async () => {
-    const res = await apiFetchJson<MyDraftResponse>(`/seasons/${seasonId}/draft/my`);
-    setMy(res);
-    return res;
-  }, [seasonId]);
-
-  const loadPool = useCallback(async () => {
-    const qs = new URLSearchParams();
-    if (search.trim()) qs.set("search", search.trim());
-    if (typeFilter.trim()) qs.set("type", typeFilter.trim());
-    if (roleFilter.trim()) qs.set("role", roleFilter.trim());
-	if (moveFilter.trim()) qs.set("move", moveFilter.trim());
-
-    // We fetch a large list and do show-mode filtering client-side for snappy toggles.
-    qs.set("page", "1");
-    qs.set("limit", "1000");
-    // Always fetch all so the UI can fully match old behavior (hide/show drafted client-side)
-    // and so the board can look up types for drafted picks.
-    qs.set("onlyAvailable", "false");
-
-    const url = `/seasons/${seasonId}/draft/pool?${qs.toString()}`;
-    const res = await apiFetchJson<DraftPoolResponse>(url);
-    setPool(res);
-    return res;
-  }, [moveFilter, roleFilter, search, seasonId, showMode, typeFilter]);
-
-  // restore view mode
-  useEffect(() => {
-    if (!Number.isFinite(seasonId) || seasonId <= 0) return;
-    try {
-      const raw = localStorage.getItem(VIEW_KEY);
-      if (raw === "flip" || raw === "classic") setViewMode(raw);
-    } catch {
-      // ignore
-    }
-  }, [VIEW_KEY, seasonId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(VIEW_KEY, viewMode);
-    } catch {
-      // ignore
-    }
-  }, [VIEW_KEY, viewMode]);
-
-  // scroll lock when sheet open
-  useEffect(() => {
-    if (!sheetFor) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [sheetFor]);
-
-  // initial load
-  useEffect(() => {
-    let cancelled = false;
-    async function loadAll() {
-      if (!Number.isFinite(seasonId) || seasonId <= 0) return;
-      setLoading(true);
-      setError(null);
-      try {
-        await Promise.all([loadLobby(), loadState(), loadMy(), loadPool(), loadSeasonSettings()]);
-        if (cancelled) return;
-      } catch (e) {
-        if (cancelled) return;
-        if (isServerErrorFromApi(e)) {
-          setError("Server error while loading draft. Check API logs.");
-        } else {
-          setError(e instanceof Error ? e.message : "Failed to load draft");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    loadAll();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadLobby, loadMy, loadPool, loadState, seasonId]);
-
-  // Auto-scroll the full board to the latest pick.
-  useEffect(() => {
-    const el = boardScrollRef.current;
-    if (!el) return;
-    // Allow the DOM to paint first.
-    const id = window.setTimeout(() => {
-      el.scrollTop = el.scrollHeight;
-    }, 0);
-    return () => window.clearTimeout(id);
-  }, [state?.picks?.length]);
-
-  // SSE live updates (auto-retry like the old draft room)
-  useEffect(() => {
-    if (!Number.isFinite(seasonId) || seasonId <= 0) return;
-
-    let alive = true;
-    let es: EventSource | null = null;
-    let retry = 0;
-    let t: ReturnType<typeof setTimeout> | null = null;
-
-    const onAny = async () => {
-      try {
-        await Promise.all([loadLobby(), loadState(), loadMy(), loadPool(), loadSeasonSettings()]);
-      } catch {
-        // ignore transient reconnect failures
-      }
-    };
-
-    const connect = () => {
-      if (!alive) return;
-      if (t) {
-        clearTimeout(t);
-        t = null;
-      }
-
-      es?.close();
-      es = new EventSource(`/api/seasons/${seasonId}/draft/stream`);
-
-      es.addEventListener("message", onAny);
-      es.addEventListener("draft:lobby", onAny as any);
-      es.addEventListener("draft:state", onAny as any);
-      es.addEventListener("draft:pool", onAny as any);
-      es.addEventListener("draft:presence", onAny as any);
-
-      es.onopen = () => {
-        retry = 0;
-      };
-
-      es.onerror = () => {
-        es?.close();
-        if (!alive) return;
-        const delay = Math.min(15000, 1000 * Math.pow(2, retry++));
-        t = setTimeout(connect, delay);
-      };
-    };
-
-    connect();
-
-    return () => {
-      alive = false;
-      if (t) clearTimeout(t);
-      es?.close();
-    };
-  }, [loadLobby, loadMy, loadPool, loadState, seasonId]);
-
-  // derived lists
-  const items = useMemo(() => {
-    const base = pool?.items ?? [];
-    let list = base;
-
-    // old: hide drafted toggle (applies unless you explicitly view drafted)
-    if (hideDrafted && showMode !== "drafted") {
-      list = list.filter((x) => !x.isPicked);
-    }
-
-    if (showMode === "drafted") {
-      list = list.filter((x) => x.isPicked);
-    } else if (showMode === "mine") {
-      const myTeamId = my?.teamId;
-      list = list.filter((x) => x.pickedByTeamId != null && x.pickedByTeamId === myTeamId);
-    } else if (showMode === "watchlist") {
-      list = list.filter((x) => watchlistSet.has(x.pokemonId) && !x.isPicked);
-    }
-
-    const minP = minPoints.trim() === "" ? -Infinity : Number(minPoints);
-    const maxP = maxPoints.trim() === "" ? Infinity : Number(maxPoints);
-    if (minPoints.trim() !== "" || maxPoints.trim() !== "") {
-      list = list.filter((x) => {
-        const pts = x.baseCost ?? NaN;
-        return Number.isFinite(pts) && pts >= minP && pts <= maxP;
-      });
-    }
-
-    const sorted = [...list];
-    const dir = sortDir === "asc" ? 1 : -1;
-    const stat = (p: DraftPoolItem, k: typeof sortKey): number => {
-      if (k === "name") return 0;
-      if (k === "dex") return p.dexNumber ?? 9999;
-      if (k === "pts") return p.baseCost ?? 9999;
-      const s = p.baseStats;
-      if (!s) return 0;
-      if (k === "hp") return s.hp;
-      if (k === "atk") return s.atk;
-      if (k === "def") return s.def;
-      if (k === "spa") return s.spa;
-      if (k === "spd") return s.spd;
-      return s.spe;
-    };
-    sorted.sort((a, b) => {
-      if (sortKey === "name") return dir * a.name.localeCompare(b.name);
-      const av = stat(a, sortKey);
-      const bv = stat(b, sortKey);
-      if (av !== bv) return dir * (av - bv);
-      return a.name.localeCompare(b.name);
-    });
-    return sorted;
-  }, [hideDrafted, maxPoints, minPoints, my?.teamId, pool?.items, showMode, sortDir, sortKey, watchlistSet]);
-
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (search.trim()) n++;
-    if (typeFilter.trim()) n++;
-    if (roleFilter.trim()) n++;
-	if (moveFilter.trim()) n++;
-    if (minPoints.trim()) n++;
-    if (maxPoints.trim()) n++;
-    if (!hideDrafted) n++;
-    return n;
-  }, [hideDrafted, maxPoints, minPoints, moveFilter, roleFilter, search, typeFilter]);
-
-  const draftedIds = useMemo(() => new Set<number>(state?.picks.map((p) => p.pokemonId) ?? []), [state?.picks]);
-
-  const rosterTypes = useMemo(() => (my?.roster ?? []).map((p) => p.types ?? []), [my?.roster]);
-  const rosterTypeSet = useMemo(() => {
-  const s = new Set<string>();
-  for (const ts of rosterTypes) {
-    for (const t of ts) {
-      const nt = normalizeType(t);
-      if (nt) s.add(nt);
-    }
+  function nameOf(id: number) {
+    const p = lobbyTeams.find((t: any) => t.team_id === id) as Participant | undefined;
+    return p ? labelForParticipant(p) : `Team ${id}`;
   }
-  return s;
-}, [rosterTypes]);
+  function up(i: number) { if (i <= 0) return; const a = seq.slice(); [a[i - 1], a[i]] = [a[i], a[i - 1]]; setSeq(a); }
+  function down(i: number) { if (i >= seq.length - 1) return; const a = seq.slice(); [a[i + 1], a[i]] = [a[i], a[i + 1]]; setSeq(a); }
+  function remove(i: number) { const a = seq.slice(); a.splice(i, 1); setSeq(a); }
+  function randomize() { const a = seq.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } setSeq(a); }
 
-  const defSummary = useMemo(() => defenseSummary(rosterTypes), [rosterTypes]);
-
-  // actions
-  const toggleReady = useCallback(async () => {
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/ready`, { method: "POST" });
-      await loadLobby();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to toggle ready");
-    }
-  }, [loadLobby, seasonId, toast]);
-
-  const updateWatchlist = useCallback(
-    async (nextSet: Set<number>) => {
-      try {
-        const ids = Array.from(nextSet);
-        await apiFetchJson(`/seasons/${seasonId}/draft/watchlist`, {
-          method: "POST",
-          body: JSON.stringify({ pokemonIds: ids })
-        });
-        await loadMy();
-        return true;
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to update watchlist");
-        return false;
-      }
-    },
-    [loadMy, seasonId, toast]
-  );
-
-  const onToggleWatch = useCallback(
-    async (pokemonId: number) => {
-      const next = new Set(watchlistSet);
-      if (next.has(pokemonId)) next.delete(pokemonId);
-      else next.add(pokemonId);
-      await updateWatchlist(next);
-    },
-    [updateWatchlist, watchlistSet]
-  );
-
-  const makePick = useCallback(
-    async (pokemonId: number) => {
-      try {
-        await apiFetchJson(`/seasons/${seasonId}/draft/pick`, {
-          method: "POST",
-          body: JSON.stringify({ pokemonId })
-        });
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Pick failed");
-      }
-    },
-    [seasonId, toast]
-  );
-
-  const joinTeam = useCallback(async () => {
-    if (!joinTeamName.trim()) return;
-    setJoinBusy(true);
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/teams/join`, {
-        method: "POST",
-        body: JSON.stringify({ name: joinTeamName.trim() })
-      });
-      setJoinTeamName("");
-      await Promise.all([loadLobby(), loadMy()]);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to create team");
-    } finally {
-      setJoinBusy(false);
-    }
-  }, [joinTeamName, loadLobby, loadMy, seasonId, toast]);
-
-  // commissioner actions
-  const adminUpdateSettings = useCallback(async () => {
-    if (!canEditSettings) return;
-    setSettingsBusy(true);
-    try {
-      settingsTouched.current = true;
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/settings`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          type: settings.type,
-          startsAt: settings.startsAt,
-          pickTimerSeconds: settings.pickTimerSeconds,
-          roundCount: settings.roundCount
-        })
-      });
-      // draftPointCap is season-scoped (not draft-session-scoped)
-      if ((seasonSettings?.settings.draftPointCap ?? 0) !== settings.draftPointCap) {
-        await apiFetchJson(`/seasons/${seasonId}/settings`, {
-          method: "PATCH",
-          body: JSON.stringify({ draftPointCap: settings.draftPointCap })
-        });
-        await loadSeasonSettings();
-      }
-      toast.success("Draft settings saved");
-      await loadLobby();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update settings");
-    } finally {
-      setSettingsBusy(false);
-    }
-  }, [canEditSettings, loadLobby, loadSeasonSettings, seasonId, seasonSettings, settings, toast]);
-
-  const adminReroll = useCallback(async () => {
-    if (!canEditSettings) return;
-    setRerollBusy(true);
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/reroll-order`, { method: "POST" });
-      await loadLobby();
-      toast.success("Draft order rerolled");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Reroll failed");
-    } finally {
-      setRerollBusy(false);
-    }
-  }, [canEditSettings, loadLobby, seasonId, toast]);
-
-  const adminStart = useCallback(async () => {
-    setAdminBusy("start");
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/start`, { method: "POST" });
-      await Promise.all([loadLobby(), loadState()]);
-      toast.success("Draft started");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Start failed");
-    } finally {
-      setAdminBusy(null);
-    }
-  }, [loadLobby, loadState, seasonId, toast]);
-
-  const adminPause = useCallback(async () => {
-    setAdminBusy("pause");
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/pause`, { method: "POST" });
-      await Promise.all([loadLobby(), loadState()]);
-      toast.success("Draft paused");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Pause failed");
-    } finally {
-      setAdminBusy(null);
-    }
-  }, [loadLobby, loadState, seasonId, toast]);
-
-  const adminResume = useCallback(async () => {
-    setAdminBusy("resume");
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/resume`, { method: "POST" });
-      await Promise.all([loadLobby(), loadState()]);
-      toast.success("Draft resumed");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Resume failed");
-    } finally {
-      setAdminBusy(null);
-    }
-  }, [loadLobby, loadState, seasonId, toast]);
-
-  const adminEnd = useCallback(async () => {
-    setAdminBusy("end");
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/end`, { method: "POST" });
-      await Promise.all([loadLobby(), loadState()]);
-      toast.success("Draft ended");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "End failed");
-    } finally {
-      setAdminBusy(null);
-    }
-  }, [loadLobby, loadState, seasonId, toast]);
-
-  const adminUndo = useCallback(async () => {
-    setAdminBusy("undo");
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/undo-last`, { method: "POST" });
-      await Promise.all([loadState(), loadMy(), loadPool()]);
-      toast.success("Undid last pick");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Undo failed");
-    } finally {
-      setAdminBusy(null);
-    }
-  }, [loadMy, loadPool, loadState, seasonId, toast]);
-
-  const adminForce = useCallback(async () => {
-    if (forcePickPokemonId === "") return;
-    setAdminBusy("force");
-    try {
-      await apiFetchJson(`/seasons/${seasonId}/draft/admin/force-pick`, {
-        method: "POST",
-        body: JSON.stringify({
-          pokemonId: forcePickPokemonId,
-          teamId: forcePickTeamId === "" ? undefined : forcePickTeamId
-        })
-      });
-      setForcePickOpen(false);
-      setForcePickPokemonId("");
-      setForcePickTeamId("");
-      await Promise.all([loadState(), loadMy(), loadPool()]);
-      toast.success("Force pick applied");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Force pick failed");
-    } finally {
-      setAdminBusy(null);
-    }
-  }, [forcePickPokemonId, forcePickTeamId, loadMy, loadPool, loadState, seasonId, toast]);
-
-  const poolById = useMemo(() => {
-    const m = new Map<number, DraftPoolItem>();
-    for (const it of pool?.items ?? []) m.set(it.pokemonId, it);
-    return m;
-  }, [pool?.items]);
-
-  const toggleFlip = useCallback((pokemonId: number) => {
-    setFlipped((prev) => {
-      const next = new Set(prev);
-      if (next.has(pokemonId)) next.delete(pokemonId);
-      else next.add(pokemonId);
-      return next;
-    });
-  }, []);
-
-  const openDetails = useCallback(
-    (p: DraftPoolItem) => {
-      if (viewMode !== "flip") return;
-      if (isMobile) {
-        setSheetSide("front");
-        setSheetFor(p);
-        return;
-      }
-      toggleFlip(p.pokemonId);
-    },
-    [isMobile, toggleFlip, viewMode]
-  );
-
-  if (loading) {
-    return (
-      <div className="stack stack-lg">
-        <PageHeader title="Draft" subtitle="Loading…" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="stack stack-lg">
-        <PageHeader title="Draft" subtitle="Error" />
-        <div className="card p-4">
-          <div className="text-sm text-danger">{error}</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!lobby) {
-    return (
-      <div className="stack stack-lg">
-        <PageHeader title="Draft" subtitle="Not found" />
-        <EmptyState title="Draft not available" description="Unable to load draft lobby." />
-      </div>
-    );
-  }
-
-  const badge = statusBadge(lobby.status);
-  const showTurnGlow = lobby.status === "InProgress" && !!youParticipant;
-  const turnGlowClass = showTurnGlow ? (isYourTurn ? "draft-turn-glow draft-turn-glow--green" : "draft-turn-glow draft-turn-glow--red") : "";
-  const boardPicks = (state?.picks ?? []).filter((p) => (boardMode === "mine" ? p.teamId === my?.teamId : true));
+  const canSave = seq.length >= 2;
 
   return (
-    <div className={`stack stack-lg ${turnGlowClass}`}>
-      <PageHeader
-        title={`Draft — ${seasonName ?? `Season #${seasonId}`}`}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            {leagueId ? (
-              <Link className="link" href={`/leagues/${leagueId}`}>
-                {leagueName ?? "League"}
-              </Link>
-            ) : (
-              <span className="text-muted">No league</span>
-            )}
-            <span className={badge.className}>{badge.label}</span>
-            {state?.teamOnTheClock ? (
-              <span className="badge badge-outline">
-                On the clock: {state.teamOnTheClock.teamName}
-              </span>
-            ) : null}
-            {state?.timer?.pickTimerSeconds ? (
-              <span className="badge badge-soft">Timer: {state.timer.pickTimerSeconds}s</span>
-            ) : null}
-            {onlineUserIds.length ? (
-              <span className="badge badge-soft">Online: {onlineUserIds.length}</span>
-            ) : null}
-          </span>
-        }
-      />
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm grid place-items-center p-4 z-50">
+      <div className="w-full max-w-2xl rounded-2xl bg-surface-2 border border-white/10 p-4 text-white grid gap-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-semibold">Set Draft Order</h3>
+          <button className="ml-auto px-3 py-1 rounded-lg bg-white/10 hover:bg-white/15" onClick={onClose}>Close</button>
+        </div>
+        <p className="text-sm opacity-80">Arrange from pick <b>#1</b> (top) to last (bottom). Save to apply.</p>
+        <div className="grid gap-2 max-h-[50vh] overflow-auto pr-1">
+          {seq.map((id, i) => (
+            <div key={id} className="flex items-center gap-2 bg-black/30 border border-white/5 rounded-xl px-3 py-2">
+              <span className="text-xs opacity-70 w-6">#{i + 1}</span>
+              <span className="font-medium flex-1 truncate">{nameOf(id)}</span>
+              <div className="flex items-center gap-1">
+                <button className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15" onClick={() => up(i)} aria-label="Move up">↑</button>
+                <button className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15" onClick={() => down(i)} aria-label="Move down">↓</button>
+                <button className="px-2 py-1 rounded-lg bg-danger hover:brightness-110" onClick={() => remove(i)} aria-label="Remove">Remove</button>
+              </div>
+            </div>
+          ))}
+          {seq.length === 0 && <div className="opacity-80 text-sm">No teams.</div>}
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15" onClick={randomize}>Randomize</button>
+          <button
+            className="ml-auto px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+            disabled={!canSave}
+            onClick={() => onSave(seq)}
+          >
+            Save order
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-      {/* Picks board (top) */}
-      <div className="card p-4 mb-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-sm font-semibold">Draft board</div>
-            <div className="text-xs text-muted">
-              {state ? `Pick ${state.overallPickNumber} • Round ${state.currentRound}` : ""}
+function DetailsSheet({
+  open, player, onClose, onDraft, watched, onToggleWatch, isMyTurn,
+}: {
+  open: boolean;
+  player: PlayerCard | null;
+  onClose: () => void;
+  onDraft: (id?: number) => void;
+  watched: boolean;
+  onToggleWatch: (id?: number) => void;
+  isMyTurn: boolean;
+}) {
+  return (
+    <AnimatePresence>
+      {open && player && (
+        <motion.div
+          className="fixed inset-0 z-50"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        >
+          <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+          <motion.div
+            className="absolute inset-x-0 bottom-0 bg-surface-2 border-t border-white/10 rounded-t-2xl p-4"
+            initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+            transition={{ type: "spring", stiffness: 260, damping: 26 }}
+          >
+            <div className="flex items-center gap-2">
+              <h4 className="text-lg font-semibold truncate">
+                {formatDisplayName(player.base_name || extractBaseAndFormFromName(player.name).base, player.form_label, player.gender)}
+              </h4>
+              <button className="ml-auto px-3 py-1 rounded-lg bg-white/10 hover:bg-white/15" onClick={onClose}>Close</button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-[5.5rem_1fr] gap-3 items-start">
+              <div className="relative h-24 w-24 rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+                {/* Types */}
+                <div className="absolute top-1 left-1 flex gap-1 z-10">
+                  {(player.types || []).map((t) => <TypeBadge key={t} t={t} />)}
+                </div>
+                {/* Star */}
+                <button
+                  className={`absolute top-1 right-1 text-lg leading-none rounded-md px-1.5 py-0.5 z-10
+                              ${watched ? "bg-amber-400/90 text-black" : "bg-black/40 text-white/90 hover:bg-black/55"}`}
+                  onClick={() => onToggleWatch(player.id)}
+                  aria-pressed={watched}
+                >
+                  {watched ? "★" : "☆"}
+                </button>
+
+                <Sprite
+                  slug={player.slug}
+                  baseName={player.base_name || baseFromSlug(player.slug)}
+                  formIndex={player.form_index ?? null}
+                  gender={player.gender ?? undefined}
+                  alt={player.name}
+                  className="absolute inset-0 m-auto w-[85%] h-[85%] object-contain"
+                />
+              </div>
+
+              <div className="min-w-0">
+                <div className="grid grid-rows-3 grid-flow-col auto-cols-fr gap-1">
+                  <div className="w-full"><Stat label="HP"  v={player.base_stats?.hp} /></div>
+                  <div className="w-full"><Stat label="Atk" v={player.base_stats?.atk} /></div>
+                  <div className="w-full"><Stat label="Def" v={player.base_stats?.def} /></div>
+                  <div className="w-full"><Stat label="SpA" v={player.base_stats?.spa} /></div>
+                  <div className="w-full"><Stat label="SpD" v={player.base_stats?.spd} /></div>
+                  <div className="w-full"><Stat label="Spe" v={player.base_stats?.spe} /></div>
+                </div>
+
+                {!!player.abilities?.length && (
+                  <div className="mt-2 text-[12px] leading-tight bg-black/30 backdrop-blur-sm rounded-md px-2 py-1 max-h-20 overflow-auto">
+                    <span className="opacity-70">Abilities: </span>
+                    <span>{player.abilities.join(", ")}</span>
+                  </div>
+                )}
+
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    className="px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+                    onClick={() => onDraft(player.id)}
+                    disabled={!isMyTurn}
+                  >
+                    Draft
+                  </button>
+                  <button
+                    className={`px-3 py-2 rounded-xl ${watched ? "bg-amber-400 text-black" : "bg-white/10"} hover:bg-white/15`}
+                    onClick={() => onToggleWatch(player.id)}
+                  >
+                    {watched ? "★ Watching" : "☆ Watch"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function SettingsPanel({
+  draft, onSave, disabled,
+}: { draft?: DraftCore; onSave: (p: any) => Promise<void>; disabled?: boolean }) {
+  const [clock, setClock] = useState<number>(draft?.clock_seconds ?? 60);
+  const [cap, setCap] = useState<string>(draft?.points_cap == null ? "" : String(draft.points_cap));
+  const [rounds, setRounds] = useState<number>(draft?.rounds ?? 8);
+  const [type, setType] = useState<"snake" | "linear">(draft?.type ?? "snake");
+
+  useEffect(() => {
+    if (!draft) return;
+    setClock(draft.clock_seconds);
+    setRounds(draft.rounds);
+    setType(draft.type);
+    setCap(draft.points_cap == null ? "" : String(draft.points_cap));
+  }, [draft?.id]); // eslint-disable-line
+
+  async function save() {
+    const body: any = { clock_seconds: Number(clock) };
+    body.points_cap = cap === "" ? null : Number(cap);
+    body.rounds = Number(rounds);
+    body.type = type;
+    await onSave(body);
+  }
+
+  return (
+    <div className="mt-3 grid gap-2">
+      <div className="grid grid-cols-2 gap-2">
+        <L label="Pick timer (seconds)">
+          <input
+            type="number"
+            min={0}
+            className="px-3 py-2 rounded-xl bg-white/80 outline-none"
+            value={clock}
+            onChange={(e) => setClock(Number(e.target.value || 0))}
+          />
+        </L>
+        <L label="Points cap (blank = none)">
+          <input
+            className="px-3 py-2 rounded-xl bg-white/80 outline-none"
+            value={cap}
+            onChange={(e) => setCap(e.target.value)}
+          />
+        </L>
+        <L label="Rounds">
+          <input
+            type="number"
+            min={1}
+            className="px-3 py-2 rounded-xl bg-white/80 outline-none"
+            value={rounds}
+            onChange={(e) => setRounds(Number(e.target.value || 0))}
+          />
+        </L>
+        <L label="Draft type">
+          <select
+            className="px-3 py-2 rounded-xl bg-white/80 outline-none"
+            value={type}
+            onChange={(e) => setType(e.target.value as any)}
+          >
+            <option value="snake">Snake</option>
+            <option value="linear">Linear</option>
+          </select>
+        </L>
+      </div>
+      <div>
+        <button
+          onClick={save}
+          disabled={disabled}
+          className="px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+        >
+          Save settings
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PlayerCardFlip({
+  player, dispName, picked, watched, disabledReason,
+  onToggleWatch, onDraft, onFlip, flipped,
+}: {
+  player: PlayerCard;
+  dispName: string;
+  picked: boolean;
+  watched: boolean;
+  disabledReason: string;
+  onToggleWatch: (e: React.MouseEvent) => void;
+  onDraft: (e: React.MouseEvent) => void;
+  onFlip: () => void;
+  flipped: boolean;
+}) {
+  return (
+    <div
+      className={`group relative rounded-2xl border ${picked ? "bg-black/10 border-white/10 opacity-60" : "bg-black/30 border-white/5"}`}
+      role="button"
+      aria-pressed={flipped}
+      onClick={onFlip}
+    >
+      {/* 3D flip container */}
+      <div className="relative [perspective:1200px] h-full">
+        <motion.div
+          className="relative [transform-style:preserve-3d] min-h-[17.5rem]"
+          animate={{ rotateY: flipped ? 180 : 0 }}
+          transition={{ duration: 0.22, ease: "easeInOut" }}
+        >
+          {/* FRONT */}
+          <div className="absolute inset-0 [backface-visibility:hidden] p-3">
+            <div className="grid grid-cols-1 gap-3">
+              {/* Sprite with overlays */}
+              <div className="relative rounded-xl bg-white/5 border border-white/10 overflow-hidden h-40">
+                {/* Types */}
+                <div className="absolute top-1 left-1 flex gap-1 z-10">
+                  {(player.types || []).map((t) => <TypeBadge key={t} t={t} />)}
+                </div>
+
+                {/* Star */}
+                <button
+                  onClick={onToggleWatch}
+                  className={`absolute top-1 right-1 text-lg leading-none rounded-md px-1.5 py-0.5 z-10
+                              ${watched ? "bg-amber-400/90 text-black" : "bg-black/40 text-white/90 hover:bg-black/55"}`}
+                  aria-pressed={watched}
+                  aria-label={`${watched ? "Remove" : "Add"} ${dispName} to watchlist`}
+                >
+                  {watched ? "★" : "☆"}
+                </button>
+
+                <Sprite
+                  slug={player.slug}
+                  baseName={player.base_name || baseFromSlug(player.slug)}
+                  formIndex={player.form_index ?? null}
+                  gender={player.gender ?? undefined}
+                  alt={dispName}
+                  className="absolute inset-0 m-auto w-32 h-32 object-contain"
+                />
+
+                {/* Name chip */}
+                <div className="absolute bottom-1 left-1 right-1">
+                  <div className="px-2 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-[12px] font-semibold" title={dispName}>
+                    <span className="block truncate">{dispName}</span>
+                  </div>
+                </div>
+
+                {/* ID badge */}
+                {typeof player.id === "number" && (
+                  <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-white/10 text-[11px]">#{player.id}</div>
+                )}
+              </div>
+
+              {/* Points + Draft */}
+              <div className="flex items-center gap-2">
+                <div className="text-sm opacity-80">
+                  {player.points != null ? <span>Points: <b>{player.points}</b></span> : <span>—</span>}
+                </div>
+                <button
+                  onClick={onDraft}
+                  disabled={!!disabledReason}
+                  className="ml-auto px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+                  aria-label={disabledReason || (player.points != null ? `Draft ${dispName} for ${player.points} points` : `Draft ${dispName}`)}
+                  title={disabledReason || `Draft ${dispName}`}
+                >
+                  {picked ? "Drafted" : "Draft"}
+                </button>
+              </div>
+
+              {/* Flip hint */}
+              <div className="text-[11px] opacity-60">Tap card to view stats & abilities</div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="join">
+          {/* BACK */}
+          <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] p-3">
+            <div className="grid gap-2 h-full">
+              {/* Stats grid */}
+              <div className="grid grid-rows-3 grid-flow-col auto-cols-fr gap-1">
+                <div className="w-full"><Stat label="HP"  v={player.base_stats?.hp} /></div>
+                <div className="w-full"><Stat label="Atk" v={player.base_stats?.atk} /></div>
+                <div className="w-full"><Stat label="Def" v={player.base_stats?.def} /></div>
+                <div className="w-full"><Stat label="SpA" v={player.base_stats?.spa} /></div>
+                <div className="w-full"><Stat label="SpD" v={player.base_stats?.spd} /></div>
+                <div className="w-full"><Stat label="Spe" v={player.base_stats?.spe} /></div>
+              </div>
+
+              {/* Abilities */}
+              {!!player.abilities?.length && (
+                <div className="text-[11px] leading-tight bg-black/30 backdrop-blur-sm rounded-md px-2 py-1 max-h-24 overflow-auto">
+                  <span className="opacity-70">Abilities: </span>
+                  <span>{player.abilities.join(", ")}</span>
+                </div>
+              )}
+
+              {/* Back actions */}
+              <div className="mt-auto flex items-center gap-2">
+                <button
+                  onClick={onDraft}
+                  disabled={!!disabledReason}
+                  className="px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+                >
+                  {picked ? "Drafted" : "Draft"}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleWatch(e); }}
+                  className={`px-3 py-2 rounded-xl ${watched ? "bg-amber-400 text-black" : "bg-white/10"} hover:bg-white/15`}
+                >
+                  {watched ? "★ Watching" : "☆ Watch"}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); }}
+                  className="ml-auto px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
+function PlayerCardClassic({
+  player, dispName, picked, watched, disabledReason,
+  onToggleWatch, onDraft,
+}: {
+  player: PlayerCard;
+  dispName: string;
+  picked: boolean;
+  watched: boolean;
+  disabledReason: string;
+  onToggleWatch: () => void;
+  onDraft: () => void;
+}) {
+  return (
+    <div className={`rounded-xl p-3 ${picked ? "bg-black/10 border border-white/10 opacity-60" : "bg-black/30 border border-white/5"}`}>
+      <div className="grid grid-cols-[9.5rem_1fr] md:grid-cols-[10rem_1fr] grid-rows-[auto_auto] gap-3 items-start">
+        {/* Sprite + overlays */}
+        <div className="row-[1] col-[1]">
+          <div className="relative rounded-xl bg-white/5 border border-white/10 overflow-hidden h-32 md:h-36">
+            {/* Types */}
+            <div className="absolute top-1 left-1 flex gap-1 z-10">
+              {(player.types || []).map((t) => <TypeBadge key={t} t={t} />)}
+            </div>
+            {/* Watch star */}
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleWatch(); }}
+              className={`absolute top-1 right-1 text-lg leading-none rounded-md px-1.5 py-0.5 z-10
+                          ${watched ? "bg-amber-400/90 text-black" : "bg-black/40 text-white/90 hover:bg-black/55"}`}
+              aria-pressed={watched}
+              aria-label={`${watched ? "Remove" : "Add"} ${dispName} to watchlist`}
+            >
+              {watched ? "★" : "☆"}
+            </button>
+
+            <Sprite
+              slug={player.slug}
+              baseName={player.base_name || baseFromSlug(player.slug)}
+              formIndex={player.form_index ?? null}
+              gender={player.gender ?? undefined}
+              alt={dispName}
+              className="absolute inset-0 m-auto w-28 h-28 md:w-32 md:h-32 object-contain"
+            />
+
+            {/* Name chip */}
+            <div className="absolute bottom-1 left-1 right-1">
+              <div className="px-2 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-[12px] font-semibold" title={dispName}>
+                <span className="block truncate">{dispName}</span>
+              </div>
+            </div>
+
+            {/* ID badge */}
+            {typeof player.id === "number" && (
+              <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-white/10 text-[11px]">#{player.id}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="row-[1] col-[2] min-w-0 justify-self-stretch self-start">
+          <h4 className="sr-only">{dispName}</h4>
+          <div className="mt-1 grid grid-rows-3 grid-flow-col auto-cols-fr gap-1">
+            <div className="w-full"><Stat label="HP"  v={player.base_stats?.hp} /></div>
+            <div className="w-full"><Stat label="Atk" v={player.base_stats?.atk} /></div>
+            <div className="w-full"><Stat label="Def" v={player.base_stats?.def} /></div>
+            <div className="w-full"><Stat label="SpA" v={player.base_stats?.spa} /></div>
+            <div className="w-full"><Stat label="SpD" v={player.base_stats?.spd} /></div>
+            <div className="w-full"><Stat label="Spe" v={player.base_stats?.spe} /></div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="row-[2] col-[1]">
+          <button
+            onClick={(e) => { e.stopPropagation(); onDraft(); }}
+            disabled={!!disabledReason}
+            className="w-full px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+            aria-label={disabledReason || (player.points != null ? `Draft ${dispName} for ${player.points} points` : `Draft ${dispName}`)}
+            title={disabledReason || `Draft ${dispName}`}
+          >
+            {picked ? "Drafted" : "Draft"}
+          </button>
+        </div>
+
+        <div className="row-[2] col-[2]">
+          {!!player.abilities?.length && (
+            <div className="text-[11px] leading-tight bg-black/30 backdrop-blur-sm rounded-md px-2 py-1">
+              <span className="opacity-70">Abilities: </span>
+              <span className="line-clamp-2">{player.abilities.join(", ")}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EndOfDraftModal({
+  open,
+  onClose,
+  onSaveToLeague,
+  onPrint,
+  onDelete,
+  state,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaveToLeague: (name: string) => Promise<void>;
+  onPrint: () => void;
+  onDelete: () => Promise<void>;
+  state: StateResp | null;
+}) {
+  const [tab, setTab] = useState<"choose" | "save">("choose");
+  const [leagueName, setLeagueName] = useState("");
+
+  useEffect(() => {
+    if (open) { setTab("choose"); setLeagueName(""); }
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-surface-2 border border-white/10 p-4 text-white">
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-semibold">Draft Finished</h3>
+          <button className="ml-auto px-3 py-1 rounded-lg bg-white/10 hover:bg-white/15" onClick={onClose}>Close</button>
+        </div>
+
+        {tab === "choose" && (
+          <>
+            <p className="mt-2 text-sm opacity-80">
+              Your draft has ended. What would you like to do?
+            </p>
+            <div className="mt-4 grid gap-3">
               <button
-                className={`btn btn-sm join-item ${boardMode === "all" ? "btn" : "btn-outline"}`}
-                type="button"
+                className="px-4 py-3 rounded-xl text-left bg-success text-black hover:brightness-110"
+                onClick={() => setTab("save")}
+              >
+                <div className="font-semibold">Save to a League</div>
+                <div className="text-sm opacity-80">Create a league and turn these draft picks into team rosters.</div>
+              </button>
+
+              <button
+                className="px-4 py-3 rounded-xl text-left bg-brand text-black hover:brightness-110"
+                onClick={onPrint}
+              >
+                <div className="font-semibold">Print Draft Board</div>
+                <div className="text-sm opacity-80">Open a print-friendly board that shows who drafted what.</div>
+              </button>
+
+              <button
+                className="px-4 py-3 rounded-xl text-left bg-danger text-white hover:brightness-110"
+                onClick={onDelete}
+              >
+                <div className="font-semibold">Delete Draft</div>
+                <div className="text-sm opacity-80">Discard the room without saving team picks. This cannot be undone.</div>
+              </button>
+            </div>
+          </>
+        )}
+
+        {tab === "save" && (
+          <>
+            <p className="mt-2 text-sm opacity-80">
+              Name your league. All teams that participated in this draft will be added, and their picks become rostered players.
+            </p>
+            <div className="mt-3 grid gap-2">
+              <label className="grid gap-1 text-sm">
+                <span className="opacity-80">League name</span>
+                <input
+                  autoFocus
+                  className="px-3 py-2 rounded-xl bg-white/10 outline-none"
+                  placeholder={`e.g. ${new Date().getFullYear()} Season`}
+                  value={leagueName}
+                  onChange={(e) => setLeagueName(e.target.value)}
+                />
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+                  disabled={!leagueName.trim()}
+                  onClick={() => onSaveToLeague(leagueName.trim())}
+                >
+                  Save league
+                </button>
+                <button
+                  className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15"
+                  onClick={() => setTab("choose")}
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ========================================================
+   Page
+   ======================================================== */
+export default function DraftRoomPage() {
+  const r = useRouter();
+  const params = useParams<{ id: string }>();
+  const draftId = Number(params?.id);
+  const FINALIZED_KEY = `draft:${draftId}:finalized`;
+  const isMobile = useIsMobile();
+
+  // auth guard
+  useEffect(() => { if (!isLoggedIn()) r.push("/login"); }, [r]);
+
+  // room state + actions
+  const room = useDraftRoom(draftId);
+  const { state, lobby, status, isCommish, msg, error, loading, myTeamId, teamLabel, userLabelByUserId } = room;
+
+  // redirect non-commissioners when ended
+  useEffect(() => {
+    if (status === "ended" && !isCommish) {
+      const dest = myTeamId ? `/teams?team=${myTeamId}` : "/teams";
+      r.replace(dest);
+    }
+  }, [status, isCommish, myTeamId, r]);
+
+  // local clock
+  const remaining = useDraftClock(status, state);
+
+  // player pool
+  const pool = usePlayerPool(draftId, state);
+  const {
+    filters, setFilters, loadingPlayers, searchPlayers,
+    playersById, sortedFilteredPlayers, draftedIds,
+    watch, toggleWatch, watchedPlayers,
+    flipped, toggleFlip, sheetFor, setSheetFor,
+    viewMode, setViewMode,
+    filtersCollapsed, setFiltersCollapsed, activeFilterCount,
+  } = pool;
+
+  // page-scoped UI state
+  const [showOrderEditor, setShowOrderEditor] = useState(false);
+  const [endedPromptOpen, setEndedPromptOpen] = useState(false);
+  const [boardMode, setBoardMode] = useState<"all" | "mine">("all");
+  useEffect(() => {
+    const already = typeof window !== "undefined" && localStorage.getItem(FINALIZED_KEY) === "1";
+    if (status === "ended") {
+      if (isCommish && !already) setEndedPromptOpen(true);
+      else setEndedPromptOpen(false);
+    } else {
+      setEndedPromptOpen(false);
+    }
+  }, [status, isCommish, draftId]);
+
+  // Auto-scroll board
+  const boardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    boardRef.current?.scrollTo({ top: boardRef.current.scrollHeight, behavior: "smooth" });
+  }, [state?.picks?.length]);
+
+  const onClockTeamId = state?.next?.onClockTeamId ?? null;
+  const isMyTurn =
+    status === "active" &&
+    onClockTeamId != null && myTeamId != null &&
+    onClockTeamId === myTeamId;
+
+  const turnRing =
+    status === "active"
+      ? (isMyTurn ? "ring-4 ring-emerald-400/70" : "ring-4 ring-red-400/50")
+      : "";
+
+  const boardPicks = (state?.picks ?? []).filter(p =>
+    boardMode === "all" ? true : p.team_id === myTeamId
+  );
+
+  // Cap guard + Draft spam guard
+  const cap = state?.draft.points_cap ?? null;
+  const pointsOf = useCallback((id?: number | null) => {
+    if (!id) return 0;
+    const pc = playersById.get(id);
+    return Number.isFinite(pc?.points as any) ? (pc!.points as number) : 0;
+  }, [playersById]);
+
+  const pointsUsed = useMemo(() => {
+    if (!myTeamId) return 0;
+    return (state?.picks ?? [])
+      .filter(p => p.team_id === myTeamId)
+      .reduce((s, p) => s + pointsOf(p.player_id), 0);
+  }, [state?.picks, myTeamId, pointsOf]);
+
+  const remainingCap = cap == null ? Infinity : Math.max(0, cap - pointsUsed);
+
+  const [pickingId, setPickingId] = useState<number | null>(null);
+  const draftOne = async (id: number) => {
+    if (pickingId != null) return;
+    if (cap != null) {
+      const cost = pointsOf(id);
+      if (cost > remainingCap) {
+        room.setError(`Cap exceeded: need ${cost}, only ${remainingCap} left`);
+        return;
+      }
+    }
+    setPickingId(id);
+    try { await room.makePick(id, myTeamId); }
+    finally { setPickingId(null); }
+  };
+
+  // print board
+  function printBoard() {
+    try {
+      const win = window.open("", "_blank");
+      if (!win) throw new Error("Popup blocked. Allow popups to print.");
+      const teamNameOf = (tid?: number | null) => teamLabel(tid);
+
+      const picks = (state?.picks ?? []).map(p => {
+        const pc = p.player_id != null ? playersById.get(p.player_id) : undefined;
+        const baseName = pc?.base_name || (pc?.name ? extractBaseAndFormFromName(pc.name).base : "");
+        const nameFmt = pc
+          ? formatDisplayName(baseName || pc.name, pc?.form_label || null, pc?.gender || null)
+          : (p.player_id != null ? `#${p.player_id}` : "—");
+        return { round: p.round, overall: p.overall_pick, team: teamNameOf(p.team_id), name: nameFmt, types: pc?.types ?? [] };
+      });
+
+      const grouped: Record<number, typeof picks> = {};
+      for (const row of picks) (grouped[row.round] ??= []).push(row);
+
+      const html = `
+<!doctype html><html>
+<head>
+<meta charset="utf-8"/>
+<title>Draft Board #${draftId}</title>
+<style>
+  body{font-family:ui-sans-serif,system-ui,Arial;margin:24px;color:#111}
+  h1{margin:0 0 6px 0;font-size:20px}
+  .meta{opacity:.7;margin-bottom:16px}
+  table{border-collapse:collapse;width:100%}
+  th,td{border:1px solid #ddd;padding:8px;font-size:13px}
+  th{background:#f3f4f6;text-align:left}
+  .types{opacity:.8;font-size:12px}
+  @media print{ body{margin:0} tr.pagebreak { page-break-after: always; } }
+</style>
+</head>
+<body>
+  <h1>Draft Board</h1>
+  <div class="meta">Draft #${draftId} • Type: ${(state?.draft.type || "").toUpperCase()} • Rounds: ${state?.draft.rounds ?? "—"}</div>
+  <table>
+    <thead>
+      <tr><th>Overall</th><th>Round</th><th>Team</th><th>Player</th><th>Types</th></tr>
+    </thead>
+    <tbody>
+      ${
+        Object.keys(grouped).sort((a,b)=>Number(a)-Number(b)).map((rk, rIdx) => {
+          const rows = grouped[Number(rk)];
+          return `
+            <tr><th colspan="5" style="background:#e5e7eb;text-align:center">Round ${rk}</th></tr>
+            ${rows.map(row => `
+              <tr>
+                <td>${row.overall}</td>
+                <td>${row.round}</td>
+                <td>${row.team}</td>
+                <td>${row.name}</td>
+                <td class="types">${(row.types||[]).join(" / ")}</td>
+              </tr>
+            `).join("")}
+            ${rIdx % 3 === 2 ? `<tr class="pagebreak"><td colspan="5"></td></tr>` : ``}
+          `;
+        }).join("")
+      }
+    </tbody>
+  </table>
+  <script>window.onload = () => { window.print(); };</script>
+</body></html>`;
+      win.document.open(); win.document.write(html); win.document.close();
+    } catch (e: any) {
+      room.setError(e?.message ?? String(e));
+    }
+  }
+
+  const myTeamPlayers = useMemo(() => {
+    const mine = (state?.picks ?? []).filter(p => p.team_id === myTeamId);
+    return mine
+      .map(p => (p.player_id != null ? playersById.get(p.player_id) : undefined))
+      .filter(Boolean) as PlayerCard[];
+  }, [state?.picks, myTeamId, playersById]);
+
+  // Prevent page scroll while mobile sheet is open
+  useEffect(() => {
+    if (sheetFor != null) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [sheetFor]);
+
+  /* ------------------------ UI ------------------------ */
+  return (
+    <main className={`min-h-[calc(100vh-64px)] bg-surface text-white p-4 md:p-6 grid gap-4 rounded-3xl ${turnRing}`}>
+      {/* Header */}
+      <header className="flex items-center gap-3">
+        <h1 className="text-2xl font-semibold">Draft Room</h1>
+        <span className="opacity-70 text-sm">#{draftId}</span>
+        <span
+          className={`ml-2 text-xs px-2 py-1 rounded-xl ${
+            status === "active" ? "bg-success text-black"
+            : status === "paused" ? "bg-secondary"
+            : status === "ended" ? "bg-danger"
+            : "bg-brand text-black"
+          }`}
+        >
+          {status.toUpperCase()}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            className="text-xs px-3 py-1 rounded-lg bg-brand text-black hover:brightness-110"
+            onClick={() => { room.loadState(); room.loadLobby(); }}
+            aria-label="Refresh room"
+          >
+            Refresh
+          </button>
+          <button
+            className="text-xs px-3 py-1 rounded-lg bg-danger hover:brightness-110"
+            onClick={() => { logout(); r.push("/login"); }}
+          >
+            Log out
+          </button>
+        </div>
+      </header>
+
+      {/* Top: status + on clock + Watchlist */}
+      <section className="grid gap-3 lg:grid-cols-[1.5fr,1fr]">
+        {/* On the clock */}
+        <div className="rounded-2xl p-4 bg-surface-2 border border-white/5">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold">On the clock</h2>
+            {cap != null && (
+              <span className="ml-auto text-xs px-2 py-1 rounded-lg bg-card text-black">
+                Cap: {cap} • Left: {Number.isFinite(remainingCap) ? remainingCap : "—"}
+              </span>
+            )}
+          </div>
+          <div className="mt-3 grid gap-1 text-sm">
+            <div>Round: <b>{state?.next?.round ?? "—"}</b></div>
+            <div>Pick: <b>{state?.next?.overall ?? state?.picks?.length ?? 0}</b></div>
+            <div>
+              Team: <b>{state?.next?.onClockTeamId ? teamLabel(state?.next?.onClockTeamId) : userLabelByUserId(state?.next as any)}</b>
+            </div>
+            <div>Timer: <b>{state?.draft?.clock_seconds === 0 ? "Unlimited" : `${remaining}s`}</b></div>
+          </div>
+
+          {isCommish && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {status !== "active" && status !== "ended" && (
+                <button
+                  onClick={room.startDraft}
+                  className="px-3 py-2 rounded-xl bg-success text-black hover:brightness-110 disabled:opacity-60"
+                  disabled={loading || !(isCommish && status !== "ended" && (state?.order?.length ?? 0) >= 2)}
+                  aria-label="Start draft"
+                  title={!(isCommish && status !== "ended" && (state?.order?.length ?? 0) >= 2) ? "Set a draft order first" : "Start draft"}
+                >Start</button>
+              )}
+              {status === "active" && (
+                <button
+                  onClick={room.pauseDraft}
+                  className="px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110 disabled:opacity-60"
+                  disabled={loading}
+                >Pause</button>
+              )}
+              {status !== "ended" && (
+                <button
+                  onClick={room.endDraft}
+                  className="px-3 py-2 rounded-xl bg-danger text-white hover:brightness-110 disabled:opacity-60"
+                  disabled={loading}
+                >End</button>
+              )}
+              <button
+                onClick={() => setShowOrderEditor(true)}
+                className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 disabled:opacity-60"
+                disabled={loading}
+                title="Set draft order"
+              >Set order</button>
+              <button
+                onClick={room.undoLast}
+                className="px-3 py-2 rounded-xl bg-secondary-light text-white hover:brightness-110 disabled:opacity-60"
+                disabled={loading}
+              >Undo last</button>
+            </div>
+          )}
+          {(msg || error) && (
+            <p className={`mt-2 text-sm ${error ? "text-red-400" : "text-white/80"}`} aria-live="polite">
+              {error || msg}
+            </p>
+          )}
+        </div>
+
+        {/* Settings & Presence + Watchlist */}
+        <div className="grid gap-3">
+          <div className="rounded-2xl p-4 bg-card text-black">
+            <h3 className="text-lg font-semibold">Room</h3>
+            <div className="mt-2 text-sm">
+              <div>Status: <b>{status}</b></div>
+              <div>Type: <b>{state?.draft?.type}</b> • Rounds: <b>{state?.draft?.rounds}</b></div>
+              <div>Teams in order: <b>{state?.order?.length ?? 0}</b></div>
+            </div>
+            {isCommish && (
+              <SettingsPanel draft={state?.draft} onSave={room.saveSettings} disabled={loading || status === "ended"} />
+            )}
+            <div className="mt-3">
+              <PresenceList presence={lobby?.presence ?? []} participants={lobby?.participants ?? []} />
+            </div>
+          </div>
+
+          {/* Watchlist + Coverage (split) */}
+          <div className="rounded-2xl p-4 bg-surface-2 border border-white/5">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold">Watchlist & Coverage</h3>
+              <span className="ml-auto text-xs opacity-75">{watchedPlayers.length} saved</span>
+            </div>
+
+            <div className="mt-2 grid gap-3 md:grid-cols-2">
+              {/* LEFT: Watchlist */}
+              <div className="rounded-2xl p-3 bg-black/30 border border-white/5 max-h-[28vh] overflow-auto pr-1">
+                {watchedPlayers.length === 0 && (
+                  <div className="opacity-70 text-sm">No watched players yet. Click ★ on a card to add.</div>
+                )}
+                <div className="grid gap-2">
+                  {watchedPlayers.map((p) => {
+                    const picked = draftedIds.has(p.id ?? -1);
+                    const baseName = p.base_name || extractBaseAndFormFromName(p.name).base;
+                    const dispName = formatDisplayName(baseName, p.form_label, p.gender);
+                    return (
+                      <div
+                        key={p.id}
+                        className={`flex items-center gap-2 rounded-xl px-2 py-2 border ${
+                          picked ? "opacity-60 bg-black/10 border-white/10" : "bg-black/30 border-white/5"
+                        }`}
+                      >
+                        <div className="relative h-10 w-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden">
+                          <Sprite
+                            slug={p.slug}
+                            baseName={p.base_name || baseFromSlug(p.slug)}
+                            formIndex={p.form_index ?? null}
+                            gender={p.gender ?? undefined}
+                            alt={dispName}
+                            className="absolute inset-0 m-auto w-[85%] h-[85%] object-contain"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium truncate">{dispName}</div>
+                          <div className="text-[11px] opacity-70 truncate">{(p.types ?? []).join(" / ")}</div>
+                        </div>
+                        {picked ? (
+                          <span className="text-[11px] px-2 py-0.5 rounded-md bg-brand text-black">Drafted</span>
+                        ) : (
+                          <button
+                            className="text-xs px-2 py-1 rounded-md bg-secondary text-white hover:brightness-110"
+                            onClick={() => p.id && draftOne(p.id)}
+                            disabled={!isMyTurn || !p.id || pickingId === p.id}
+                            title={isMyTurn ? `Draft ${dispName}` : "Not your turn"}
+                          >
+                            Draft
+                          </button>
+                        )}
+                        <button
+                          className="text-lg px-2"
+                          title="Remove from watchlist"
+                          onClick={() => toggleWatch(p.id)}
+                          aria-label={`Remove ${dispName} from watchlist`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* RIGHT: Coverage */}
+              <CoveragePanel myTeamPlayers={myTeamPlayers} />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Middle: order + picks board */}
+      <section className="grid gap-3 md:grid-cols-[1fr,2fr]">
+        <div className="rounded-2xl p-4 bg-surface-2 border border-white/5">
+          <h3 className="text-lg font-semibold">Draft order</h3>
+          <ol className="mt-2 grid gap-1 text-sm">
+            {state?.order?.length ? (
+              state.order.map((o: OrderRow) => (
+                <li
+                  key={o.slot}
+                  className={`px-3 py-2 rounded-xl ${
+                    state?.next?.slot === o.slot ? "bg-brand text-black" : "bg-black/30 border border-white/5"
+                  }`}
+                >
+                  <span className="opacity-70 mr-2">#{o.slot}</span>
+                  {teamLabel(o.team_id)}
+                </li>
+              ))
+            ) : (
+              <p className="opacity-80">Order not set</p>
+            )}
+          </ol>
+        </div>
+
+        {/* BOARD */}
+        <div className="rounded-2xl p-4 bg-surface-2 border border-white/5">
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold">Board</h3>
+            <div className="ml-auto rounded-xl bg-white/10 p-1">
+              <button
+                className={`px-3 py-1 rounded-lg text-sm ${boardMode === "all" ? "bg-secondary text-white" : "text-white/80 hover:bg-white/15"}`}
                 onClick={() => setBoardMode("all")}
+                aria-pressed={boardMode === "all"}
               >
                 All picks
               </button>
               <button
-                className={`btn btn-sm join-item ${boardMode === "mine" ? "btn" : "btn-outline"}`}
-                type="button"
+                className={`ml-1 px-3 py-1 rounded-lg text-sm ${boardMode === "mine" ? "bg-secondary text-white" : "text-white/80 hover:bg-white/15"}`}
                 onClick={() => setBoardMode("mine")}
-                disabled={!my?.teamId}
-                title={!my?.teamId ? "Join a team to use this" : ""}
+                aria-pressed={boardMode === "mine"}
               >
-                My picks
+                My team
               </button>
             </div>
-
-            {youParticipant ? (
-              <button className="btn btn-sm" onClick={toggleReady} type="button">
-                {youParticipant.isReady ? "Unready" : "Ready"}
-              </button>
-            ) : null}
-
-            <div className="join">
-              <button
-                className={`btn btn-sm join-item ${boardStyle === "grid" ? "btn" : "btn-outline"}`}
-                type="button"
-                onClick={() => setBoardStyle("grid")}
-              >
-                Grid
-              </button>
-              <button
-                className={`btn btn-sm join-item ${boardStyle === "table" ? "btn" : "btn-outline"}`}
-                type="button"
-                onClick={() => setBoardStyle("table")}
-              >
-                Table
-              </button>
-            </div>
-
-            {isYourTurn && lobby.status === "InProgress" ? <span className="badge badge-success">Your pick</span> : null}
           </div>
-        </div>
 
-        <div ref={boardScrollRef} className="mt-4 max-h-[320px] overflow-auto rounded-md border border-subtle">
-          {boardStyle === "table" ? (
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-surface">
-                <tr>
-                  <th className="text-left p-2 w-16">#</th>
-                  <th className="text-left p-2">Team</th>
-                  <th className="text-left p-2">Pokémon</th>
-                </tr>
-              </thead>
-              <tbody>
-                {boardPicks.map((p) => (
-                  <tr key={p.id} className="border-t border-subtle">
-                    <td className="p-2 font-mono">{p.overallPickNumber}</td>
-                    <td className="p-2 truncate">{teamNameById.get(p.teamId) ?? p.teamName ?? `Team #${p.teamId}`}</td>
-                    <td className="p-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
-                          {p.spriteUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={p.spriteUrl}
-                              alt={p.pokemonName ?? String(p.pokemonId)}
-                              className="w-8 h-8 object-contain"
-                            />
-                          ) : (
-                            <span className="text-xs text-muted">?</span>
-                          )}
-                        </div>
-                        <span className="truncate">{p.pokemonName ?? `Pokémon #${p.pokemonId}`}</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+          <div
+            ref={boardRef}
+            className="mt-2 max-h-[60vh] overflow-auto pr-1
+                       grid gap-3
+                       [grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr))]"
+          >
+            {boardPicks.length ? (
+              boardPicks.map((p: PickRow) => {
+                const pc = p.player_id != null ? playersById.get(p.player_id) : undefined;
+                const baseName = pc?.base_name || (pc?.name ? extractBaseAndFormFromName(pc.name).base : "");
+                const formLabel = pc?.form_label || null;
+                const gender = pc?.gender || null;
+                const nameFmt = pc
+                  ? formatDisplayName(baseName || pc.name, formLabel, gender)
+                  : (p.player_id != null ? `#${p.player_id}` : "—");
+                const slug = pc?.slug ?? "";
+                const types = pc?.types ?? [];
 
-                {boardPicks.length === 0 ? (
-                  <tr>
-                    <td className="p-3 text-xs text-muted" colSpan={3}>
-                      No picks yet.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          ) : (
-            <div className="p-3">
-              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(12rem,1fr))]">
-                {boardPicks.map((p) => {
-                  const meta = poolById.get(p.pokemonId);
-                  return (
-                    <div key={p.id} className="rounded-md border border-subtle p-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
-                          {p.spriteUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={p.spriteUrl}
-                              alt={p.pokemonName ?? String(p.pokemonId)}
-                              className="w-9 h-9 object-contain"
-                            />
-                          ) : (
-                            <span className="text-xs text-muted">?</span>
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs text-muted font-mono">#{p.overallPickNumber}</div>
-                          <div className="draft-classic-name truncate">{p.pokemonName ?? `Pokémon #${p.pokemonId}`}</div>
-                          <div className="text-xs text-muted truncate">
-                            {teamNameById.get(p.teamId) ?? p.teamName ?? `Team #${p.teamId}`}
-                          </div>
-                        </div>
-                      </div>
-                      {meta?.types?.length ? (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {meta.types.slice(0, 2).map((t) => (
-                            <TypePill key={t} t={t} />
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-
-                {boardPicks.length === 0 ? (
-                  <div className="text-xs text-muted">No picks yet.</div>
-                ) : null}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-        {/* Left: Order + commissioner */}
-        <div className="md:col-span-3 space-y-4">
-          <div className="card p-4">
-            <div className="text-sm font-semibold mb-2">Draft order</div>
-            <div className="space-y-1">
-              {lobby.participants.map((p) => {
-                const onClock = state?.teamOnTheClock?.teamId === p.teamId && lobby.status === "InProgress";
-                const cls = onClock
-                  ? "border-l-4 border-success bg-success/5"
-                  : p.isYou
-                    ? "border-l-4 border-brand bg-brand/5"
-                    : "border-l-4 border-transparent";
                 return (
-                  <div key={p.teamId} className={`flex items-center justify-between rounded-lg px-3 py-2 ${cls}`}>
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium truncate">{p.position}. {p.teamName}</div>
-                      <div className="text-xs text-muted truncate">
-                        {p.managerDisplayName ?? `User #${p.managerUserId}`}
+                  <div
+                    key={p.id}
+                    className="rounded-2xl bg-black/30 border border-white/5 p-2"
+                    title={`${nameFmt} • ${teamLabel(p.team_id)}`}
+                  >
+                    <div className="relative aspect-square w-full rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+                      <div className="absolute top-1 left-1 flex gap-1">
+                        {types.map((t) => <TypeBadge key={t} t={t} />)}
+                      </div>
+
+                      {slug ? (
+                        <Sprite
+                          slug={slug}
+                          baseName={baseName}
+                          formIndex={pc?.form_index ?? null}
+                          gender={gender ?? undefined}
+                          alt={nameFmt}
+                          className="absolute inset-0 m-auto w-[80%] h-[80%] object-contain"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 grid place-items-center text-[10px] opacity-60">—</div>
+                      )}
+
+                      <div className="absolute bottom-1 left-1 right-1">
+                        <div className="px-2 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-[12px] font-semibold">
+                          <span className="block truncate">{nameFmt}</span>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {p.isReady ? <span className="badge badge-success">Ready</span> : <span className="badge badge-soft">Not ready</span>}
+
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs opacity-70 shrink-0">R{p.round} • #{p.overall_pick}</span>
+                      <span className="font-medium truncate" title={teamLabel(p.team_id)}>{teamLabel(p.team_id)}</span>
                     </div>
                   </div>
                 );
-              })}
-            </div>
-	          </div>
-
-	          <div className="card p-4">
-	            <div className="flex items-center justify-between">
-	              <div className="text-sm font-semibold">Coaches</div>
-	              <span className="badge badge-soft">{lobby.participants.length}</span>
-	            </div>
-	            <div className="mt-3 space-y-1">
-	              {lobby.participants.map((p) => {
-	                const online = onlineUserIds.includes(p.managerUserId);
-	                return (
-	                  <div
-	                    key={p.teamId}
-	                    className={`flex items-center justify-between rounded-lg px-3 py-2 ${
-	                      p.isYou ? "border border-brand/30 bg-brand/5" : "border border-subtle"
-	                    }`}
-	                  >
-	                    <div className="min-w-0">
-	                      <div className="flex items-center gap-2 min-w-0">
-	                        <span
-	                          className={`draft-online-dot ${online ? "draft-online-dot--on" : ""}`}
-	                          aria-label={online ? "Online" : "Offline"}
-	                          title={online ? "Online" : "Offline"}
-	                        />
-	                        <div className="text-sm font-medium truncate">{p.teamName}</div>
-	                      </div>
-	                      <div className="text-xs text-muted truncate">{p.managerDisplayName ?? `User #${p.managerUserId}`}</div>
-	                    </div>
-	                    <div className="flex items-center gap-2">
-	                      {p.isReady ? <span className="badge badge-success">Ready</span> : <span className="badge badge-soft">Not ready</span>}
-	                    </div>
-	                  </div>
-	                );
-	              })}
-	            </div>
-	          </div>
-
-          {canManage ? (
-            <div className="card p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Commissioner</div>
-                {settingsLocked ? <span className="badge badge-soft">Settings locked</span> : null}
-              </div>
-
-              {/* Settings only before draft starts */}
-              {canEditSettings ? (
-                <div className="mt-3 space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-xs text-muted">Type</label>
-                    <select
-                      className="input input-sm"
-                      value={settings.type}
-                      onChange={(e) => setSettings((s) => ({ ...s, type: e.target.value as DraftType }))}
-                    >
-                      <option value="Snake">Snake</option>
-                      <option value="Linear">Linear</option>
-                      <option value="Custom">Custom</option>
-                    </select>
-
-                    <label className="text-xs text-muted">Timer (sec)</label>
-                    <input
-                      className="input input-sm"
-                      inputMode="numeric"
-                      value={settings.pickTimerSeconds ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, pickTimerSeconds: e.target.value === "" ? null : Number(e.target.value) }))}
-                    />
-
-                    <label className="text-xs text-muted">Rounds</label>
-                    <input
-                      className="input input-sm"
-                      inputMode="numeric"
-                      value={settings.roundCount ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, roundCount: e.target.value === "" ? null : Number(e.target.value) }))}
-                    />
-
-                    <label className="text-xs text-muted">Point cap (0=∞)</label>
-                    <input
-                      className="input input-sm"
-                      inputMode="numeric"
-                      value={settings.draftPointCap}
-                      onChange={(e) => setSettings((s) => ({ ...s, draftPointCap: Math.max(0, Number(e.target.value) || 0) }))}
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="btn btn-sm"
-                      onClick={adminUpdateSettings}
-                      disabled={settingsBusy}
-                    >
-                      Save settings
-                    </button>
-                    <button className="btn btn-sm btn-outline" onClick={adminReroll} disabled={rerollBusy}>
-                      Reroll order
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button className="btn btn-sm" onClick={adminStart} disabled={!canStartDraft || adminBusy === "start"}>
-                  Start
-                </button>
-                <button
-                  className="btn btn-sm"
-                  onClick={lobby.status === "Paused" ? adminResume : adminPause}
-                  disabled={adminBusy === "pause" || adminBusy === "resume" || (lobby.status !== "InProgress" && lobby.status !== "Paused")}
-                >
-                  {lobby.status === "Paused" ? "Resume" : "Pause"}
-                </button>
-                <button className="btn btn-sm btn-outline" onClick={() => setForcePickOpen(true)}>
-                  Force pick
-                </button>
-                <button className="btn btn-sm btn-outline" onClick={() => setConfirmUndoOpen(true)} disabled={(state?.picks?.length ?? 0) === 0}>
-                  Undo last
-                </button>
-                <button className="btn btn-sm btn-danger" onClick={() => setConfirmEndOpen(true)} disabled={adminBusy === "end"}>
-                  End
-                </button>
-              </div>
-
-              {!canStartDraft && canEditSettings ? (
-                <div className="mt-2 text-xs text-muted">
-                  To start: set rounds + timer, and all teams must be ready.
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {!youParticipant ? (
-            <div className="card p-4">
-              <div className="text-sm font-semibold">Join this season</div>
-              <div className="text-xs text-muted mt-1">Create a team to participate in the draft.</div>
-              <div className="mt-3 flex gap-2">
-                <input
-                  className="input input-sm flex-1"
-                  placeholder="Team name"
-                  value={joinTeamName}
-                  onChange={(e) => setJoinTeamName(e.target.value)}
-                />
-                <button className="btn btn-sm" onClick={joinTeam} disabled={joinBusy || !joinTeamName.trim()}>
-                  Create
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Middle: Pool */}
-        <div className="md:col-span-6 space-y-4">
-          <div className="card p-4">
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="text-sm font-semibold">Pokémon pool</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button className="btn btn-sm btn-outline" type="button" onClick={loadPool}>
-                    Refresh list
-                  </button>
-                  <button
-                    className="btn btn-sm btn-outline"
-                    type="button"
-                    onClick={() => setFiltersOpen((v) => !v)}
-                  >
-                    Filters
-                    {activeFilterCount ? <span className="ml-2 badge badge-soft">{activeFilterCount}</span> : null}
-                  </button>
-                  <div className="join">
-                    <button
-                      className={`btn btn-sm join-item ${viewMode === "flip" ? "btn" : "btn-outline"}`}
-                      type="button"
-                      onClick={() => setViewMode("flip")}
-                    >
-                      Flip
-                    </button>
-                    <button
-                      className={`btn btn-sm join-item ${viewMode === "classic" ? "btn" : "btn-outline"}`}
-                      type="button"
-                      onClick={() => setViewMode("classic")}
-                    >
-                      Classic
-                    </button>
-                    </div>
-                  </div>
-                </div>
-
-                {filtersOpen ? (
-                <div className="space-y-3 draft-filters">
-                    <div className="draft-filter-grid">
-                      <div>
-                        <label className="text-xs text-muted">Search</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={search}
-                          onChange={(e) => setSearch(e.target.value)}
-                          placeholder="e.g. Dragapult"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted">Type</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={typeFilter}
-                          onChange={(e) => setTypeFilter(e.target.value)}
-                          placeholder="e.g. Water"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted">Ability</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={roleFilter}
-                          onChange={(e) => setRoleFilter(e.target.value)}
-                          placeholder="e.g. Levitate"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted">Move</label>
-                        <input
-                          className="input input-sm w-full"
-                          value={moveFilter}
-                          onChange={(e) => setMoveFilter(e.target.value)}
-                          placeholder="e.g. Stealth Rock"
-                        />
-                      </div>
-                    </div>
-                  
-
-                    <div className="draft-filter-grid">
-                      <div>
-                        <label className="text-xs text-muted">Min cost</label>
-                        <input
-                          className="input input-sm w-full"
-                          inputMode="numeric"
-                          value={minPoints}
-                          onChange={(e) => setMinPoints(e.target.value)}
-                          placeholder="Min"
-                        />
-						</div>
-                      <div>
-                        <label className="text-xs text-muted">Max cost</label>
-                        <input
-                          className="input input-sm w-full"
-                          inputMode="numeric"
-                          value={maxPoints}
-                          onChange={(e) => setMaxPoints(e.target.value)}
-                          placeholder="Max"
-                        />
-                      </div>
-                   <div>
-                        <label className="text-xs text-muted">Sort</label>
-                        <select
-                          className="input input-sm w-full"
-                          value={sortKey}
-                          onChange={(e) => setSortKey(e.target.value as any)}
-                        >
-                          <option value="dex">Dex</option>
-                          <option value="name">Name</option>
-                          <option value="pts">Points</option>
-                          <option value="hp">HP</option>
-                          <option value="atk">ATK</option>
-                          <option value="def">DEF</option>
-                          <option value="spa">SpA</option>
-                          <option value="spd">SpD</option>
-                          <option value="spe">SPE</option>
-                        </select>
-                        </div>
-                      <div>
-                        <label className="text-xs text-muted">Direction</label>
-                        <select
-                          className="input input-sm w-full"
-                          value={sortDir}
-                          onChange={(e) => setSortDir(e.target.value as any)}
-                        >
-                          <option value="asc">Asc</option>
-                          <option value="desc">Desc</option>
-                        </select>
-                      </div>
-                    </div>
-					
-                    <div className="draft-filter-actions">
-                      <label className="flex items-center gap-2 text-xs text-muted whitespace-nowrap">
-                        <input
-                          type="checkbox"
-                          className="checkbox checkbox-sm"
-                          checked={hideDrafted}
-                          onChange={(e) => setHideDrafted(e.target.checked)}
-                        />
-                        Hide drafted
-                      </label>
-					  <button className="btn btn-sm" type="button" onClick={loadPool}>
-                        Apply filters
-                      </button>
-                    </div>
-                  </div>
-               ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <div className="join">
-                  <button className={`btn btn-sm join-item ${showMode === "available" ? "btn" : "btn-outline"}`} onClick={() => setShowMode("available")}>Available</button>
-                  <button className={`btn btn-sm join-item ${showMode === "drafted" ? "btn" : "btn-outline"}`} onClick={() => setShowMode("drafted")}>Drafted</button>
-                  <button className={`btn btn-sm join-item ${showMode === "mine" ? "btn" : "btn-outline"}`} onClick={() => setShowMode("mine")}>Mine</button>
-                  <button className={`btn btn-sm join-item ${showMode === "watchlist" ? "btn" : "btn-outline"}`} onClick={() => setShowMode("watchlist")}>Watchlist</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          
-          <div className="draft-pool-layout">
-            <div
-              className={`draft-pool-grid ${viewMode === "flip" ? "draft-pool-grid--flip" : "draft-pool-grid--classic"}`}
-            >
-            {items.length === 0 ? (
-              <div className="col-span-full">
-                <EmptyState title="No Pokémon" description="Try adjusting your filters." />
-              </div>
-            ) : null}
-
-            {items.map((p) => {
-              const picked = p.isPicked;
-              const pickedByYou = picked && p.pickedByTeamId != null && p.pickedByTeamId === my?.teamId;
-              const watch = watchlistSet.has(p.pokemonId);
-              const canPickNow = lobby.status === "InProgress" && isYourTurn && !picked;
-const statEntries = [
-                { label: "HP", value: p.baseStats?.hp },
-                { label: "ATK", value: p.baseStats?.atk },
-                { label: "DEF", value: p.baseStats?.def },
-                { label: "SpA", value: p.baseStats?.spa },
-                { label: "SpD", value: p.baseStats?.spd },
-                { label: "SPE", value: p.baseStats?.spe }
-              ];
-              const abilitiesLine = (p.roles ?? []).length ? (p.roles ?? []).slice(0, 3).join(", ") : "—";
-              return viewMode === "classic" ? (
-                <div
-                  key={p.pokemonId}
-                  className={`card draft-classic-card ${picked ? "opacity-70" : ""} ${
-                    pickedByYou ? "draft-classic-card--mine" : ""
-                  }`}
-                >
-                  
-
-                  <div className="draft-classic-layout">
-                    <div className="draft-classic-sprite">
-                      {p.spriteUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.spriteUrl} alt={p.name} className="draft-classic-sprite-img" />
-                      ) : (
-                        <span className="text-xs text-muted">?</span>
-                      )}
-                    </div>
-
-                    <div className="draft-classic-main">
-                      <div className="draft-classic-header">
-                        <div className="draft-classic-title">
-                          <div className="draft-classic-name truncate">{p.name}</div>
-                          {p.dexNumber ? <div className="draft-classic-dex">#{p.dexNumber}</div> : null}
-                        </div>
-                        <div className="draft-classic-types">
-                          {(p.types ?? []).map((t) => (
-                            <TypePill key={t} t={t} />
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="draft-classic-stats">
-                        {statEntries.map((stat) => (
-                          <div key={stat.label} className="draft-classic-stat-tile">
-                            <span className="draft-classic-stat-label">{stat.label}</span>
-                            <span className="draft-classic-stat-value">{stat.value ?? 0}</span>
-                          </div>
-                        ))}
-                      </div>
-					</div>
-                  </div>
-
-                      <div className="draft-classic-footer">
-                     <div className="draft-classic-actions">
-                      <button
-                        className="btn btn-sm draft-classic-cta"
-                        onClick={() => makePick(p.pokemonId)}
-                        disabled={!canPickNow}
-                        type="button"
-                        title={
-                          !canPickNow
-                            ? picked
-                              ? "Already drafted"
-                              : lobby.status !== "InProgress"
-                                ? "Draft not in progress"
-                                : !isYourTurn
-                                  ? "Not your turn"
-                                  : ""
-                            : "Make pick"
-                        }
-                      >
-                        Draft
-                      </button>
-                      <button
-                        className={`draft-watch-btn draft-classic-watch-btn ${watch ? "is-active" : ""}`}
-                        onClick={() => onToggleWatch(p.pokemonId)}
-                        title={watch ? "Remove from watchlist" : "Add to watchlist"}
-                        type="button"
-                      >
-                        {watch ? "★" : "☆"}
-                      </button>
-                    </div>
-                    <div className="draft-classic-points">
-                      <span className="draft-classic-points-label">Points</span>
-                      <span className="draft-classic-points-value">{p.baseCost ?? "—"}</span>
-                      {picked ? (
-                        <span className="draft-classic-picked">
-                          Drafted by{" "}
-                          {p.pickedByTeamId ? teamNameById.get(p.pickedByTeamId) ?? `Team #${p.pickedByTeamId}` : "?"}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-) : (
-  <div
-    key={p.pokemonId}
-    className={`card border ${picked ? "opacity-70" : ""} ${pickedByYou ? "border-brand" : "border-subtle"} draft-pool-card`}
-  >
-    <div
-      role="button"
-      className="draft-flip"
-      onClick={() => openDetails(p)}
-	  onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openDetails(p);
-        }
-      }}
-      tabIndex={0}
-      title={isMobile ? "Open details" : "Flip card"}
-      aria-pressed={flipped.has(p.pokemonId)}
-    >
-      <div className={`draft-flip-inner ${flipped.has(p.pokemonId) ? "is-flipped" : ""}`}>
-        <div className="draft-flip-face draft-flip-front">
-          <div className="draft-sprite">
-            {p.spriteUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={p.spriteUrl} alt={p.name} className="draft-sprite-img" />
+              })
             ) : (
-              <span className="draft-sprite-missing">?</span>
+              <p className="opacity-80">
+                {boardMode === "mine" ? "No picks for your team yet." : "No picks yet."}
+              </p>
             )}
-
-            <div className="draft-sprite-overlay">
-             <div className="draft-sprite-top">
-                <div className="draft-type-row">
-                  {(p.types ?? []).slice(0, 2).map((t) => (
-                    <span
-                      key={t}
-                      className="draft-type-chip"
-                      style={
-                        (() => {
-                          const nt = normalizeType(t);
-                          const bg = nt ? TYPE_COLORS[nt] : undefined;
-                          return bg ? { backgroundColor: bg, borderColor: bg } : undefined;
-                        })()
-                      }
-                    >
-                      {normalizeType(t) ?? t}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="draft-watch-btn-wrapper">
-                  <button
-                    className={`draft-watch-btn ${watch ? "is-active" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleWatch(p.pokemonId);
-                    }}
-                    title={watch ? "Remove from watchlist" : "Add to watchlist"}
-                    type="button"
-                  >
-                    {watch ? "★" : "☆"}
-                  </button>
-                </div>
-              </div>
-
-            <div className="draft-sprite-bottom">
-                <div className="draft-points-pill">
-                  <span className="draft-cost-label">Pts</span>
-                  <span className="draft-cost-value">{p.baseCost ?? "—"}</span>
-                </div>
-              </div>
-            </div>
-
-            {picked ? <div className="draft-sprite-badge">Drafted</div> : null}
-          </div>
-
-          <div className="draft-card-body">
-            <div className="draft-card-title">
-              <span className="draft-name">{p.name}</span>
-              {p.dexNumber ? <span className="draft-dex">#{p.dexNumber}</span> : null}
-            </div>
-
-            <div className="draft-card-helper">
-              Tap card to view stats & abilities
-            </div>
-			<div className="draft-front-actions">
-              <button
-                className="btn btn-sm draft-front-cta"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  makePick(p.pokemonId);
-                }}
-                disabled={!canPickNow}
-                type="button"
-                title={
-                  !canPickNow
-                    ? picked
-                      ? "Already drafted"
-                      : lobby.status !== "InProgress"
-                        ? "Draft not in progress"
-                        : !isYourTurn
-                          ? "Not your turn"
-                          : ""
-                    : "Make pick"
-                }
-              >
-                {picked ? "Drafted" : "Draft"}
-              </button>
-            </div>
           </div>
         </div>
+      </section>
 
-        <div className="draft-flip-face draft-flip-back">
-          <div className="draft-card-back-body">
-            <div className="draft-card-title">
-              <span className="draft-name">{p.name}</span>
-              {p.dexNumber ? <span className="draft-dex">#{p.dexNumber}</span> : null}
-            </div>
-
-            <div className="draft-back-stats">
-              {statEntries.map((stat) => (
-                <div key={stat.label} className="draft-stat-tile">
-                  <span className="draft-stat-tile-label">{stat.label}</span>
-                  <span className="draft-stat-tile-value">{typeof stat.value === "number" ? stat.value : 0}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="draft-abilities-line">
-              <span className="draft-abilities-prefix">Abilities:</span>
-              <span className="draft-abilities-text">{abilitiesLine}</span>
-            </div>
-          </div>
-        
-
-    <div className="draft-back-actions">
-            <button
-              className="btn btn-sm draft-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                makePick(p.pokemonId);
-              }}
-              disabled={!canPickNow}
-              type="button"
-              title={
-                !canPickNow
-                  ? picked
-                    ? "Already drafted"
-                    : lobby.status !== "InProgress"
-                      ? "Draft not in progress"
-                      : !isYourTurn
-                        ? "Not your turn"
-                        : ""
-                  : "Make pick"
-              }
-            >
-              {picked ? "Drafted" : "Draft"}
-            </button>
-
-            <button
-              className={`btn btn-sm draft-action-btn draft-action-btn--ghost ${watch ? "is-active" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleWatch(p.pokemonId);
-              }}
-              type="button"
-              title={watch ? "Remove from watchlist" : "Add to watchlist"}
-            >
-              {watch ? "★ Watching" : "☆ Watch"}
-            </button>
-
-            <button
-              className="btn btn-sm draft-action-btn draft-action-btn--ghost"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleFlip(p.pokemonId);
-              }}
-              type="button"
-            >
-              Back
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-);
-            })}
-            </div>
-
-            <aside className="draft-pool-aside">
-<div className="draft-side-card">
-  <div className="draft-side-header">
-    <div className="draft-side-title">Watchlist</div>
-    <div className="draft-side-actions">
-      <span className="badge badge-soft">{watchlistSet.size}</span>
-    </div>
-  </div>
-
-  <div className="draft-watchlist">
-    {(pool?.items ?? [])
-      .filter((p) => watchlistSet.has(p.pokemonId) && !draftedIds.has(p.pokemonId))
-      .slice(0, 12)
-      .map((p) => (
-        <button
-          key={p.pokemonId}
-          className="draft-watch-row"
-          onClick={() => onToggleWatch(p.pokemonId)}
-          title="Toggle watch"
-          type="button"
-        >
-          <span className="draft-watch-icon">★</span>
-          <span className="draft-watch-name">{p.name}</span>
-          <span className="draft-watch-cost">{p.baseCost ?? "—"}</span>
-        </button>
-      ))}
-	  {watchlistSet.size === 0 ? (
-      <div className="draft-watch-empty text-xs text-muted">Star Pokémon to add them here.</div>
-    ) : null}
-  </div>
-</div>
-
-<div className="draft-side-card">
-  <div className="draft-side-header">
-    <div className="draft-side-title">Team analyser</div>
-    <div className="draft-side-actions">
-      <div className="join">
-        <button
-          className={`btn btn-xs join-item ${analyserMode === "coverage" ? "btn" : "btn-outline"}`}
-          onClick={() => setAnalyserMode("coverage")}
-        >
-          Coverage
-        </button>
-        <button
-          className={`btn btn-xs join-item ${analyserMode === "defense" ? "btn" : "btn-outline"}`}
-          onClick={() => setAnalyserMode("defense")}
-        >
-          Defense
-        </button>
-      </div>
-    </div>
-  </div>
-  {analyserMode === "coverage" ? (
-    <div className="draft-side-group">
-      <div>
-        <div className="draft-side-label">Types you have (drafted by you).</div>
-        <div className="draft-type-pill-row">
-          {TYPES.filter((t) => rosterTypeSet.has(t)).length ? (
-            TYPES.filter((t) => rosterTypeSet.has(t)).map((t) => <TypePill key={t} t={t} />)
-          ) : (
-            <span className="text-xs text-muted">None yet.</span>
-          )}
-        </div>
-      </div>
-
-      <div>
-        <div className="draft-side-label">Types you&apos;re missing.</div>
-        <div className="draft-type-pill-row">
-          {TYPES.filter((t) => !rosterTypeSet.has(t)).map((t) => (
-            <TypePill key={t} t={t} dimmed />
-          ))}
-        </div>
-      </div>
-    </div>
-  ) : (
-    <div className="draft-side-group">
-      <div>
-        <div className="draft-side-label">Immune (at least one)</div>
-        <div className="draft-defense-row">
-          {defSummary.immune.length ? defSummary.immune.map((t) => <span key={t} className="draft-defense-chip draft-defense-chip--immune">{t}</span>) : <span className="text-xs text-muted">None</span>}
-        </div>
-      </div>
-      <div>
-        <div className="draft-side-label">Resists (team worst-case &lt; 1×)</div>
-        <div className="draft-defense-row">
-          {defSummary.resist.length ? defSummary.resist.map((t) => <span key={t} className="draft-defense-chip draft-defense-chip--resist">{t}</span>) : <span className="text-xs text-muted">None</span>}
-        </div>
-      </div>
-      <div>
-        <div className="draft-side-label">Weak (team worst-case &gt; 1×)</div>
-        <div className="draft-defense-row">
-          {defSummary.weak.length ? defSummary.weak.map((t) => <span key={t} className="draft-defense-chip draft-defense-chip--weak">{t}</span>) : <span className="text-xs text-muted">None</span>}
-        </div>
-      </div>
-    </div>
-  )}
-</div>
-            </aside>
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile: flip details sheet */}
-
-      {sheetFor ? (
-        <div className="fixed inset-0 z-50">
+      {/* Bottom: Pokémon search + pick */}
+      <section className="rounded-2xl p-4 bg-surface-2 border border-white/5">
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-semibold">Pokémon pool</h3>
           <button
-            type="button"
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setSheetFor(null)}
-            aria-label="Close"
-          />
-          <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-auto rounded-t-2md bg-surface border-t border-subtle shadow-md">
-            <div className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="w-16 h-16 rounded-md bg-muted flex items-center justify-center overflow-hidden shrink-0">
-                    {sheetFor.spriteUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={sheetFor.spriteUrl} alt={sheetFor.name} className="w-16 h-16 object-contain" />
-                    ) : (
-                      <span className="text-xs text-muted">?</span>
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-base font-semibold truncate">
-                      {sheetFor.name}{" "}
-                      {sheetFor.dexNumber ? <span className="text-xs text-muted">#{sheetFor.dexNumber}</span> : null}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {(sheetFor.types ?? []).map((t) => (
-                        <TypePill key={t} t={t} />
-                      ))}
-                      {(sheetFor.roles ?? []).slice(0, 3).map((r) => (
-                        <span key={r} className="badge badge-soft text-xs">
-                          {r}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+            className="ml-auto px-3 py-2 rounded-xl bg-brand text-black hover:brightness-110 disabled:opacity-60"
+            onClick={searchPlayers}
+            disabled={loadingPlayers}
+          >
+            {loadingPlayers ? "Searching…" : "Refresh list"}
+          </button>
+          <button
+            className="px-3 py-2 rounded-xl bg-white/10 text-white hover:bg-white/15"
+            onClick={() => setFiltersCollapsed(v => !v)}
+            aria-controls="pool-filters"
+            aria-expanded={!filtersCollapsed}
+            title={filtersCollapsed ? "Show filters" : "Hide filters"}
+          >
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="ml-1 text-xs px-1.5 py-0.5 rounded bg-brand text-black">
+                {activeFilterCount}
+              </span>
+            )}
+            <span className="ml-1">{filtersCollapsed ? "▸" : "▾"}</span>
+          </button>
 
-                <button className="btn btn-sm btn-outline" type="button" onClick={() => setSheetFor(null)}>
-                  Close
-                </button>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between">
-                <div className="join">
-                  <button
-                    type="button"
-                    className={`btn btn-sm join-item ${sheetSide === "front" ? "btn" : "btn-outline"}`}
-                    onClick={() => setSheetSide("front")}
-                  >
-                    Front
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm join-item ${sheetSide === "back" ? "btn" : "btn-outline"}`}
-                    onClick={() => setSheetSide("back")}
-                  >
-                    Back
-                  </button>
-                </div>
-                <div className="text-sm">
-                  Cost: <span className="font-mono">{sheetFor.baseCost ?? "—"}</span>
-                </div>
-              </div>
-
-              {sheetSide === "front" ? (
-                <div className="mt-4 text-xs text-muted">
-                  Tap “Back” for stats.
-                </div>
-              ) : (
-                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1">
-                  <StatLine label="HP" v={sheetFor.baseStats?.hp} />
-                  <StatLine label="ATK" v={sheetFor.baseStats?.atk} />
-                  <StatLine label="DEF" v={sheetFor.baseStats?.def} />
-                  <StatLine label="SpA" v={sheetFor.baseStats?.spa} />
-                  <StatLine label="SpD" v={sheetFor.baseStats?.spd} />
-                  <StatLine label="SPE" v={sheetFor.baseStats?.spe} />
-                </div>
-              )}
-
-              <div className="mt-5 flex items-center justify-between">
-                <button
-                  className={`btn btn-sm btn-ghost ${watchlistSet.has(sheetFor.pokemonId) ? "text-warning" : "text-muted"}`}
-                  type="button"
-                  onClick={() => onToggleWatch(sheetFor.pokemonId)}
-                >
-                  {watchlistSet.has(sheetFor.pokemonId) ? "★ Watched" : "☆ Watch"}
-                </button>
-
-                <button
-                  className="btn btn-sm"
-                  type="button"
-                  onClick={() => makePick(sheetFor.pokemonId)}
-                  disabled={!(lobby.status === "InProgress" && isYourTurn && !sheetFor.isPicked)}
-                >
-                  Pick
-                </button>
-              </div>
-            </div>
+          {/* View toggle */}
+          <div className="items-center rounded-xl bg-white/10 p-1">
+            <button
+              className={`px-3 py-1 rounded-lg text-sm ${viewMode === "flip" ? "bg-secondary text-white" : "text-white/80 hover:bg-white/15"}`}
+              onClick={() => setViewMode("flip")}
+              aria-pressed={viewMode === "flip"}
+            >
+              Flip
+            </button>
+            <button
+              className={`ml-1 px-3 py-1 rounded-lg text-sm ${viewMode === "classic" ? "bg-secondary text-white" : "text-white/80 hover:bg-white/15"}`}
+              onClick={() => setViewMode("classic")}
+              aria-pressed={viewMode === "classic"}
+            >
+              Classic
+            </button>
           </div>
         </div>
-      ) : null}
 
-      {/* Confirmations */}
-      <ConfirmDialog
-        open={confirmEndOpen}
-        title="End draft"
-        description="This will mark the draft as completed."
-        confirmLabel="End draft"
-        confirmKind="danger"
-        onCancel={() => setConfirmEndOpen(false)}
-        onConfirm={async () => {
-          setConfirmEndOpen(false);
-          await adminEnd();
-        }}
-      />
-
-      <ConfirmDialog
-        open={confirmUndoOpen}
-        title="Undo last pick"
-        description="This will remove the most recent pick and revert roster ownership."
-        confirmLabel="Undo"
-        confirmKind="primary"
-        onCancel={() => setConfirmUndoOpen(false)}
-        onConfirm={async () => {
-          setConfirmUndoOpen(false);
-          await adminUndo();
-        }}
-      />
-
-      <ConfirmDialog
-        open={forcePickOpen}
-        title="Force pick"
-        description="Pick a Pokémon (and optionally a team) as commissioner."
-        confirmLabel="Force"
-        confirmKind="primary"
-        onCancel={() => setForcePickOpen(false)}
-        onConfirm={adminForce}
-        isBusy={adminBusy === "force"}
-      >
-        <div className="grid grid-cols-1 gap-2">
-          <label className="text-xs text-muted">Team (optional)</label>
-          <select
-            className="input input-sm"
-            value={forcePickTeamId}
-            onChange={(e) => setForcePickTeamId(e.target.value === "" ? "" : Number(e.target.value))}
-          >
-            <option value="">(Current team on clock)</option>
-            {lobby.participants.map((p) => (
-              <option key={p.teamId} value={p.teamId}>
-                {p.teamName}
-              </option>
-            ))}
-          </select>
-
-          <label className="text-xs text-muted">Pokémon id</label>
-          <input
-            className="input input-sm"
-            inputMode="numeric"
-            value={forcePickPokemonId}
-            onChange={(e) => setForcePickPokemonId(e.target.value === "" ? "" : Number(e.target.value))}
-          />
+        <div className="mt-3">
+          <AnimatePresence initial={false}>
+            {!filtersCollapsed && (
+              <motion.div
+                id="pool-filters"
+                key="pool-filters"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.18, ease: "easeInOut" }}
+                className="sticky top-2 z-10 overflow-hidden"
+              >
+                <Filters filters={filters} onChange={setFilters} onSearch={searchPlayers} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </ConfirmDialog>
 
-    </div>
+        <div
+          className={`mt-3 grid gap-3 ${
+            viewMode === "flip"
+              ? "[grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]"
+              : "[grid-template-columns:repeat(auto-fit,minmax(18rem,1fr))]"
+          }`}
+        >
+          {sortedFilteredPlayers.map((p) => {
+            const picked = draftedIds.has(p.id ?? -1);
+            const baseName = p.base_name || extractBaseAndFormFromName(p.name).base;
+            const dispName = formatDisplayName(baseName, p.form_label, p.gender);
+            const disabledReason =
+              picked ? "Already drafted"
+              : status !== "active" ? "Draft is not active"
+              : !(state?.next?.onClockTeamId && myTeamId && state.next.onClockTeamId === myTeamId) ? "Not your turn"
+              : !p.id ? "Invalid player" : "";
+            const watched = watch.has(p.id ?? -1);
+            const flippedNow = p.id != null && flipped.has(p.id);
+
+            return viewMode === "flip" ? (
+              <PlayerCardFlip
+                key={p.id ?? p.slug}
+                player={p}
+                dispName={dispName}
+                picked={picked}
+                watched={watched}
+                disabledReason={disabledReason}
+                onToggleWatch={(e) => { e.stopPropagation(); toggleWatch(p.id); }}
+                onDraft={(e) => { e.stopPropagation(); if (p.id) draftOne(p.id); }}
+                onFlip={() => isMobile ? setSheetFor(p.id ?? null) : toggleFlip(p.id)}
+                flipped={!!flippedNow}
+              />
+            ) : (
+              <PlayerCardClassic
+                key={p.id ?? p.slug}
+                player={p}
+                dispName={dispName}
+                picked={picked}
+                watched={watched}
+                disabledReason={disabledReason}
+                onToggleWatch={() => toggleWatch(p.id)}
+                onDraft={() => p.id && draftOne(p.id)}
+              />
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Order editor (commissioner only) */}
+      {isCommish && showOrderEditor && (
+        <OrderEditor
+          participants={lobby?.participants ?? []}
+          currentOrder={(state?.order ?? []).map((o) => o.team_id)}
+          onClose={() => setShowOrderEditor(false)}
+          onSave={async (seq) => { await room.saveOrder(seq); setShowOrderEditor(false); }}
+        />
+      )}
+
+      {/* Mobile bottom sheet for card details */}
+      <DetailsSheet
+        open={sheetFor != null}
+        player={sheetFor != null ? playersById.get(sheetFor) : null}
+        onClose={() => setSheetFor(null)}
+        onDraft={(id) => id && draftOne(id)}
+        watched={sheetFor != null ? watch.has(sheetFor) : false}
+        onToggleWatch={(id) => toggleWatch(id)}
+        isMyTurn={isMyTurn}
+      />
+
+      {/* End-of-draft options (commissioner) */}
+      <EndOfDraftModal
+        open={endedPromptOpen}
+        onClose={() => setEndedPromptOpen(false)}
+        onSaveToLeague={async (name) => {
+          await room.createLeagueFromDraft(name);
+          try { localStorage.setItem(FINALIZED_KEY, "1"); } catch {}
+          setEndedPromptOpen(false);
+        }}
+        onPrint={printBoard}
+        onDelete={async () => {
+          if (!confirm("Are you sure you want to delete this draft? This will NOT save any team picks.")) return;
+          await room.deleteDraft();
+        }}
+        state={state}
+      />
+    </main>
   );
 }
