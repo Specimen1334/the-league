@@ -1492,16 +1492,7 @@ const statEntries = [
                     pickedByYou ? "draft-classic-card--mine" : ""
                   }`}
                 >
-                  <div className="draft-classic-watch">
-                    <button
-                      className={`draft-watch-btn ${watch ? "is-active" : ""}`}
-                      onClick={() => onToggleWatch(p.pokemonId)}
-                      title={watch ? "Remove from watchlist" : "Add to watchlist"}
-                      type="button"
-                    >
-                      {watch ? "★" : "☆"}
-                    </button>
-                  </div>
+                  
 
                   <div className="draft-classic-layout">
                     <div className="draft-classic-sprite">
@@ -1527,36 +1518,46 @@ const statEntries = [
                       </div>
 
                       <div className="draft-classic-stats">
-                        <StatLine label="HP" v={p.baseStats?.hp} />
-                        <StatLine label="ATK" v={p.baseStats?.atk} />
-                        <StatLine label="DEF" v={p.baseStats?.def} />
-                        <StatLine label="SpA" v={p.baseStats?.spa} />
-                        <StatLine label="SpD" v={p.baseStats?.spd} />
-                        <StatLine label="SPE" v={p.baseStats?.spe} />
+                        {statEntries.map((stat) => (
+                          <div key={stat.label} className="draft-classic-stat-tile">
+                            <span className="draft-classic-stat-label">{stat.label}</span>
+                            <span className="draft-classic-stat-value">{stat.value ?? 0}</span>
+                          </div>
+                        ))}
                       </div>
 					</div>
                   </div>
 
                       <div className="draft-classic-footer">
-                    <button
-                      className="btn btn-sm draft-classic-cta"
-                      onClick={() => makePick(p.pokemonId)}
-                      disabled={!canPickNow}
-                      type="button"
-                      title={
-                        !canPickNow
-                          ? picked
-                            ? "Already drafted"
-                            : lobby.status !== "InProgress"
-                              ? "Draft not in progress"
-                              : !isYourTurn
-                                ? "Not your turn"
-                                : ""
-                          : "Make pick"
-                      }
-                    >
-                      Draft
-                    </button>
+                     <div className="draft-classic-actions">
+                      <button
+                        className="btn btn-sm draft-classic-cta"
+                        onClick={() => makePick(p.pokemonId)}
+                        disabled={!canPickNow}
+                        type="button"
+                        title={
+                          !canPickNow
+                            ? picked
+                              ? "Already drafted"
+                              : lobby.status !== "InProgress"
+                                ? "Draft not in progress"
+                                : !isYourTurn
+                                  ? "Not your turn"
+                                  : ""
+                            : "Make pick"
+                        }
+                      >
+                        Draft
+                      </button>
+                      <button
+                        className={`draft-watch-btn draft-classic-watch-btn ${watch ? "is-active" : ""}`}
+                        onClick={() => onToggleWatch(p.pokemonId)}
+                        title={watch ? "Remove from watchlist" : "Add to watchlist"}
+                        type="button"
+                      >
+                        {watch ? "★" : "☆"}
+                      </button>
+                    </div>
                     <div className="draft-classic-points">
                       <span className="draft-classic-points-label">Points</span>
                       <span className="draft-classic-points-value">{p.baseCost ?? "—"}</span>
