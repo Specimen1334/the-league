@@ -1654,6 +1654,30 @@ const statEntries = [
             <div className="draft-card-helper">
               Tap card to view stats & abilities
             </div>
+			<div className="draft-front-actions">
+              <button
+                className="btn btn-sm draft-front-cta"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  makePick(p.pokemonId);
+                }}
+                disabled={!canPickNow}
+                type="button"
+                title={
+                  !canPickNow
+                    ? picked
+                      ? "Already drafted"
+                      : lobby.status !== "InProgress"
+                        ? "Draft not in progress"
+                        : !isYourTurn
+                          ? "Not your turn"
+                          : ""
+                    : "Make pick"
+                }
+              >
+                {picked ? "Drafted" : "Draft"}
+              </button>
+            </div>
           </div>
         </div>
 
