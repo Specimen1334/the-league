@@ -3,21 +3,10 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { authHeaders, isLoggedIn, logout } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
+import { ApiError, apiFetchJson } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { extractBaseAndFormFromName, baseFromSlug, formatDisplayName } from "@/kit/names";
-import { Sprite } from "@/kit/sprites";
-import { TypeBadge, Stat, Filters } from "@/kit/ui";
-import { useDraftClock, useIsMobile } from "@/kit/hooks";
-import {
-  fetchState, fetchLobby,
-  startDraftSvc, pauseDraftSvc, endDraftSvc, undoLastSvc,
-  saveSettingsSvc, saveOrderSvc, makePickSvc,
-  createLeagueFromDraftSvc, deleteDraftSvc,
-} from "@/kit/drafts";
-import type { DraftStatus, DraftCore, StateResp, OrderRow, PickRow } from "@/kit/types";
-import { TYPES, teamTypeSet, defenseSummary } from "@/kit/combat";
-import { API_BASE as API } from "@/kit/api";
+import { TYPES, TYPE_COLORS, normalizeType, teamTypeSet, defenseSummary } from "@/lib/pokemon-types";
 
 /* ========================================================
    Types local to this page
@@ -39,6 +28,7 @@ type PlayerCard = {
   abilities?: string[];
   base_stats?: { hp?: number; atk?: number; def?: number; spa?: number; spd?: number; spe?: number };
   moves?: string[];
+  sprite_url?: string | null;
 };
 
 // What the lobby participants *may* have now that we’re username-first.
@@ -53,24 +43,92 @@ type Participant = {
   // Fallbacks
   team_name?: string | null;
   manager_display_name?: string | null;
+  position?: number;
 };
 
 /* ========================================================
    Utils
    ======================================================== */
-function titlify(s: string) {
-  return s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+type DraftStatus = "pending" | "active" | "paused" | "ended";
+
+type DraftCore = {
+  clock_seconds?: number;
+  points_cap?: number | null;
+  rounds?: number | null;
+  type?: "snake" | "linear";
+};
+
+type OrderRow = {
+  slot: number;
+  team_id: number;
+};
+
+type PickRow = {
+  id: number;
+  round: number;
+  overall_pick: number;
+  team_id: number;
+  player_id: number;
+};
+
+type StateResp = {
+  status: DraftStatus;
+  draft?: DraftCore;
+  next?: {
+    round: number;
+    overall: number;
+    onClockTeamId: number | null;
+    slot?: number | null;
+  };
+  picks: PickRow[];
+  order?: OrderRow[];
+};
+
+function extractBaseAndFormFromName(name: string): { base: string; form: string | null } {
+  const trimmed = name.trim();
+  if (!trimmed) return { base: "", form: null };
+  const match = trimmed.match(/^(.*?)(?:\s*\((.+)\))?$/);
+  if (!match) return { base: trimmed, form: null };
+  const base = (match[1] || "").trim();
+  const form = match[2] ? match[2].trim() : null;
+  return { base: base || trimmed, form };
 }
-function decodeMyUserId(): number | null {
-  try {
-    const tok = localStorage.getItem("token");
-    if (!tok) return null;
-    const [, payload] = tok.split(".");
-    if (!payload) return null;
-    const p = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-    const sub = p?.sub;
-    return typeof sub === "number" ? sub : (sub ? Number(sub) : null);
-  } catch { return null; }
+
+function formatDisplayName(
+  base: string,
+  form?: string | null,
+  gender?: "Male" | "Female" | string | null
+): string {
+  const bits: string[] = [];
+  if (base) bits.push(base);
+  if (form && form.trim()) bits.push(`(${form.trim()})`);
+  if (gender) {
+    const marker = gender === "Male" ? "♂" : gender === "Female" ? "♀" : gender;
+    bits.push(marker);
+  }
+  return bits.join(" ").trim();
+}
+
+function normalizeSpriteKey(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^A-Z0-9_]/g, "_");
+}
+
+function buildSpriteUrlFromName(value?: string | null): string | null {
+  if (!value) return null;
+  const key = normalizeSpriteKey(value);
+  return `/assets/pokemon/${key}.png`;
+}
+
+function resolveSpriteUrl(player?: PlayerCard | null): string | null {
+  if (!player) return null;
+  return (
+    player.sprite_url ??
+    buildSpriteUrlFromName(player.base_name || player.slug)
+  );
 }
 
 // Username-first label: prefer usernames; fall back to team_name; else a generic.
@@ -88,31 +146,233 @@ function labelForParticipant(p?: Participant | null): string {
 }
 
 /* ========================================================
-   Draft data services — thin wrappers per page needs
+   Shared UI atoms + hooks
    ======================================================== */
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  const text = await res.text();
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch {}
-  if (!res.ok) {
-    const message = (data && (data.error || data.message)) || text || "Request failed";
-    throw new Error(message);
+function Sprite({
+  src,
+  alt,
+  className,
+}: {
+  src?: string | null;
+  alt: string;
+  className?: string;
+}) {
+  if (!src) {
+    return <div className={className} aria-label={alt} role="img" />;
   }
-  return (data as T);
+// eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt} className={className} />;
 }
-async function postAction(path: string, body?: any) {
-  return fetchJSON<any>(`${API}${path}`, {
-    method: "POST",
-    headers: { ...authHeaders(), ...(body ? { "Content-Type": "application/json" } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+
+function TypeBadge({ t }: { t: string }) {
+  const normalized = normalizeType(t);
+  const color = normalized ? TYPE_COLORS[normalized] : "#6B7280";
+  return (
+    <span
+      className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold text-black"
+      style={{ backgroundColor: color }}
+    >
+      {normalized ?? t}
+    </span>
+  );
+}
+
+function Stat({ label, v }: { label: string; v?: number | null }) {
+  return (
+    <div className="rounded-md bg-black/30 border border-white/10 px-2 py-1 text-center">
+      <div className="text-[10px] uppercase tracking-wide opacity-60">{label}</div>
+      <div className="text-sm font-semibold">{v ?? "—"}</div>
+    </div>
+  );
+}
+
+type DraftFilters = {
+  q: string;
+  type: string;
+  ability: string;
+  move: string;
+  minPoints: string;
+  maxPoints: string;
+  sortKey: "id" | "pts" | "hp" | "atk" | "def" | "spa" | "spd" | "spe";
+  sortDir: "asc" | "desc";
+  hideDrafted: boolean;
+};
+
+function Filters({
+  filters,
+  onChange,
+  onSearch,
+}: {
+  filters: DraftFilters;
+  onChange: React.Dispatch<React.SetStateAction<DraftFilters>>;
+  onSearch: () => void;
+}) {
+  return (
+    <div className="rounded-2xl bg-black/30 border border-white/5 p-3 grid gap-3">
+      <div className="grid gap-3 md:grid-cols-3">
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Search</span>
+          <input
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            placeholder="Search Pokémon"
+            value={filters.q}
+            onChange={(e) => onChange((prev) => ({ ...prev, q: e.target.value }))}
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Type</span>
+          <select
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            value={filters.type}
+            onChange={(e) => onChange((prev) => ({ ...prev, type: e.target.value }))}
+          >
+            <option value="">All</option>
+            {TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Ability</span>
+          <input
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            placeholder="Filter by ability"
+            value={filters.ability}
+            onChange={(e) => onChange((prev) => ({ ...prev, ability: e.target.value }))}
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Move</span>
+          <input
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            placeholder="Filter by move"
+            value={filters.move}
+            onChange={(e) => onChange((prev) => ({ ...prev, move: e.target.value }))}
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Min points</span>
+          <input
+            type="number"
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            value={filters.minPoints}
+            onChange={(e) => onChange((prev) => ({ ...prev, minPoints: e.target.value }))}
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Max points</span>
+          <input
+            type="number"
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            value={filters.maxPoints}
+            onChange={(e) => onChange((prev) => ({ ...prev, maxPoints: e.target.value }))}
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Sort by</span>
+          <select
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            value={filters.sortKey}
+            onChange={(e) =>
+              onChange((prev) => ({
+                ...prev,
+                sortKey: e.target.value as DraftFilters["sortKey"]
+              }))
+            }
+          >
+            <option value="id">Dex #</option>
+            <option value="pts">Points</option>
+            <option value="hp">HP</option>
+            <option value="atk">Atk</option>
+            <option value="def">Def</option>
+            <option value="spa">SpA</option>
+            <option value="spd">SpD</option>
+            <option value="spe">Spe</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="opacity-70">Sort direction</span>
+          <select
+            className="px-3 py-2 rounded-xl bg-white/80 text-black outline-none"
+            value={filters.sortDir}
+            onChange={(e) =>
+              onChange((prev) => ({
+                ...prev,
+                sortDir: e.target.value as DraftFilters["sortDir"]
+              }))
+            }
+          >
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm mt-6">
+          <input
+            type="checkbox"
+            checked={filters.hideDrafted}
+            onChange={(e) => onChange((prev) => ({ ...prev, hideDrafted: e.target.checked }))}
+          />
+          <span className="opacity-80">Hide drafted</span>
+        </label>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          className="px-3 py-2 rounded-xl bg-secondary text-white hover:brightness-110"
+          onClick={onSearch}
+        >
+          Search
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, [breakpoint]);
+
+  return isMobile;
+}
+
+function useDraftClock(status: DraftStatus, state: StateResp | null) {
+  const clock = state?.draft?.clock_seconds ?? 0;
+  const [remaining, setRemaining] = useState(clock);
+
+  useEffect(() => {
+    setRemaining(clock);
+  }, [clock, status, state?.next?.overall]);
+
+  useEffect(() => {
+    if (status !== "active") return undefined;
+    if (!clock) return undefined;
+    const interval = setInterval(() => {
+      setRemaining((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [clock, status, state?.next?.overall]);
+
+  return remaining;
 }
 
 /* ========================================================
    useDraftRoom — connection, state, actions
    ======================================================== */
 function useDraftRoom(draftId: number) {
+  const { user, logout } = useAuth();
   const [state, setState] = useState<StateResp | null>(null);
   const [lobby, setLobby] = useState<{
     draft: any;
@@ -125,11 +385,79 @@ function useDraftRoom(draftId: number) {
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [presence, setPresence] = useState<{ userId: number; teamId: number | null }[]>([]);
 
-  const myUserId = useMemo(decodeMyUserId, []);
+  const myUserId = user?.id ?? null;
   const myTeamRef = useRef<number | null>(null);
   const [myTeamId, setMyTeamId] = useState<number | null>(null);
+const isCommissioner = useMemo(() => {
+    const role = user?.role?.toLowerCase();
+    return role === "commissioner" || role === "superadmin" || role === "admin";
+  }, [user?.role]);
+  const apiBaseUrl = useMemo(() => process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api", []);
 
+  type ApiDraftStatus = "NotStarted" | "Lobby" | "InProgress" | "Paused" | "Completed";
+  type ApiDraftStateResponse = {
+    seasonId: number;
+    status: ApiDraftStatus;
+    type: "Snake" | "Linear" | "Custom";
+    currentRound: number;
+    currentPickInRound: number;
+    overallPickNumber: number;
+    totalTeams: number;
+    teamOnTheClock: { teamId: number; teamName: string } | null;
+    timer: { pickTimerSeconds: number | null };
+    picks: {
+      id: number;
+      round: number;
+      pickInRound: number;
+      overallPickNumber: number;
+      teamId: number;
+      teamName: string | null;
+      pokemonId: number;
+      pokemonName: string | null;
+      spriteUrl: string | null;
+    }[];
+  };
+
+  type ApiDraftLobbyResponse = {
+    seasonId: number;
+    status: ApiDraftStatus;
+    type: "Snake" | "Linear" | "Custom";
+    startsAt: string | null;
+    pickTimerSeconds: number | null;
+    roundCount: number | null;
+    participants: {
+      teamId: number;
+      teamName: string;
+      managerUserId: number;
+      managerDisplayName: string | null;
+      position: number;
+      isReady: boolean;
+      isYou: boolean;
+    }[];
+  };
+
+  const mapStatus = useCallback((status: ApiDraftStatus): DraftStatus => {
+    switch (status) {
+      case "InProgress":
+        return "active";
+      case "Paused":
+        return "paused";
+      case "Completed":
+        return "ended";
+      case "NotStarted":
+      case "Lobby":
+      default:
+        return "pending";
+    }
+  }, []);
+
+  const mapDraftType = useCallback((type: ApiDraftStateResponse["type"]): DraftCore["type"] => {
+    if (type === "Linear") return "linear";
+    return "snake";
+  }, []);
+  
   // mounted guard for async setState
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -138,23 +466,72 @@ function useDraftRoom(draftId: number) {
     try { return await fn(); }
     catch (e: any) {
       const m = String(e?.message || "").toLowerCase();
-      if (m.includes("unauthorized") || /401/.test(m)) {
-        logout();
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        await logout();
         // don’t navigate here — page will redirect on auth check in parent effect
       }
       throw e;
     }
-  }, []);
+  }, [logout]);
+
+  const fetchState = useCallback(async () => {
+    const data = await apiFetchJson<ApiDraftStateResponse>(`/seasons/${draftId}/draft/state`);
+    return {
+      status: mapStatus(data.status),
+      draft: {
+        clock_seconds: data.timer?.pickTimerSeconds ?? 0,
+        points_cap: null,
+        rounds: null,
+        type: mapDraftType(data.type),
+      },
+      next: {
+        round: data.currentRound,
+        overall: data.overallPickNumber,
+        onClockTeamId: data.teamOnTheClock?.teamId ?? null,
+        slot: data.currentPickInRound,
+      },
+      picks: data.picks.map((p) => ({
+        id: p.id,
+        round: p.round,
+        overall_pick: p.overallPickNumber,
+        team_id: p.teamId,
+        player_id: p.pokemonId,
+      })),
+    } as StateResp;
+  }, [draftId, mapDraftType, mapStatus]);
+
+  const fetchLobby = useCallback(async () => {
+    const data = await apiFetchJson<ApiDraftLobbyResponse>(`/seasons/${draftId}/draft/lobby`);
+    return {
+      draft: {
+        clock_seconds: data.pickTimerSeconds ?? 0,
+        points_cap: null,
+        rounds: data.roundCount ?? null,
+        type: mapDraftType(data.type),
+      },
+      participants: data.participants.map((p) => ({
+        team_id: p.teamId,
+        team_name: p.teamName,
+        manager_user_id: p.managerUserId,
+        manager_display_name: p.managerDisplayName,
+        position: p.position,
+      })),
+      invites: [],
+      status: mapStatus(data.status),
+      is_commissioner: isCommissioner,
+      presence,
+    };
+  }, [draftId, isCommissioner, mapDraftType, mapStatus, presence]);
 
   const loadState = useCallback(async () => {
-    try { const j = await guarded(() => fetchState(draftId)); if (mountedRef.current) setState(j); }
+    try { const j = await guarded(() => fetchState()); if (mountedRef.current) setState(j); }
     catch (e: any) { if (mountedRef.current) setError(e?.message ?? String(e)); }
-  }, [draftId, guarded]);
+ }, [fetchState, guarded]);
 
   const loadLobby = useCallback(async () => {
-    try { const j = await guarded(() => fetchLobby(draftId)); if (mountedRef.current) setLobby(j as any); }
+    try { const j = await guarded(() => fetchLobby()); if (mountedRef.current) setLobby(j as any); }
     catch (e: any) { if (mountedRef.current) setError(e?.message ?? String(e)); }
-  }, [draftId, guarded]);
+  }, [fetchLobby, guarded]);
 
   // My team
   useEffect(() => {
@@ -171,18 +548,26 @@ function useDraftRoom(draftId: number) {
     let alive = true;
     async function beat() {
       try {
-        await fetch(`${API}/drafts/${draftId}/presence`, {
-          method: "POST",
-          headers: { ...authHeaders(), "Content-Type": "application/json" },
-          body: JSON.stringify({ teamId: myTeamRef.current }),
-        });
+         const res = await apiFetchJson<{ onlineUserIds: number[] }>(
+          `/seasons/${draftId}/draft/presence`,
+          { method: "POST" }
+        );
+        if (!alive) return;
+        const nextPresence = res.onlineUserIds.map((userId) => ({
+          userId,
+          teamId: lobby?.participants.find((p) => p.manager_user_id === userId)?.team_id ?? null,
+        }));
+        if (mountedRef.current) {
+          setPresence(nextPresence);
+          setLobby((prev) => prev ? { ...prev, presence: nextPresence } : prev);
+        }
       } catch {}
       if (!alive) return;
       t = setTimeout(beat, 5000);
     }
     if (draftId) beat();
     return () => { alive = false; if (t) clearTimeout(t); };
-  }, [draftId]);
+  }, [draftId, lobby?.participants]);
 
   // SSE with auto-retry
   useEffect(() => {
@@ -190,13 +575,11 @@ function useDraftRoom(draftId: number) {
     let es: EventSource | null = null;
     let retry = 0;
     const connect = () => {
-      es = new EventSource(`${API}/drafts/${draftId}/stream`, { withCredentials: true });
+      es = new EventSource(`${apiBaseUrl}/seasons/${draftId}/draft/stream`, { withCredentials: true });
       const reloadAll = () => { loadState(); loadLobby(); };
-      es.addEventListener("presence:update", () => setTimeout(loadLobby, 50));
-      es.addEventListener("lobby:update", () => setTimeout(loadLobby, 50));
-      es.addEventListener("draft:status", () => reloadAll());
-      es.addEventListener("state:update", () => setTimeout(loadState, 50));
-      es.addEventListener("draft:settings", () => setTimeout(loadState, 50));
+      es.addEventListener("draft:presence", () => setTimeout(loadLobby, 50));
+      es.addEventListener("draft:lobby", () => setTimeout(loadLobby, 50));
+      es.addEventListener("draft:state", () => reloadAll());
       es.onerror = () => {
         es?.close();
         if (!mountedRef.current) return;
@@ -206,7 +589,7 @@ function useDraftRoom(draftId: number) {
     };
     connect();
     return () => es?.close();
-  }, [draftId, loadState, loadLobby]);
+  }, [apiBaseUrl, draftId, loadState, loadLobby]);
 
   // Initial load
   useEffect(() => { loadState(); loadLobby(); }, [loadState, loadLobby]);
@@ -230,27 +613,46 @@ function useDraftRoom(draftId: number) {
     }
   }, [loadState, loadLobby]);
 
-  const startDraft = useCallback(() => doAction(() => startDraftSvc(draftId)), [doAction, draftId]);
-  const pauseDraft = useCallback(() => doAction(() => pauseDraftSvc(draftId)), [doAction, draftId]);
-  const endDraft = useCallback(() => doAction(() => endDraftSvc(draftId)), [doAction, draftId]);
-  const undoLast = useCallback(() => doAction(() => undoLastSvc(draftId)), [doAction, draftId]);
+  const startDraft = useCallback(() => doAction(() => apiFetchJson(`/seasons/${draftId}/draft/admin/start`, { method: "POST" })), [doAction, draftId]);
+  const pauseDraft = useCallback(() => doAction(() => apiFetchJson(`/seasons/${draftId}/draft/admin/pause`, { method: "POST" })), [doAction, draftId]);
+  const endDraft = useCallback(() => doAction(() => apiFetchJson(`/seasons/${draftId}/draft/admin/end`, { method: "POST" })), [doAction, draftId]);
+  const undoLast = useCallback(() => doAction(() => apiFetchJson(`/seasons/${draftId}/draft/admin/undo-last`, { method: "POST" })), [doAction, draftId]);
   const saveSettings = useCallback((patch: Partial<{ clock_seconds: number; points_cap: number | null; rounds: number; type: "snake" | "linear" }>) =>
-    doAction(() => saveSettingsSvc(draftId, patch)), [doAction, draftId]);
+    doAction(() => {
+      const body: { pickTimerSeconds?: number | null; roundCount?: number | null; type?: "Snake" | "Linear" } = {};
+      if (patch.clock_seconds !== undefined) body.pickTimerSeconds = patch.clock_seconds;
+      if (patch.rounds !== undefined) body.roundCount = patch.rounds;
+      if (patch.type) body.type = patch.type === "linear" ? "Linear" : "Snake";
+      return apiFetchJson(`/seasons/${draftId}/draft/admin/settings`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+    }), [doAction, draftId]);
   const saveOrder = useCallback((teamIds: number[]) =>
-    doAction(() => saveOrderSvc(draftId, teamIds)), [doAction, draftId]);
-  const makePick = useCallback(async (playerId: number, teamId: number | null) => {
+    doAction(async () => {
+      if (!teamIds.length) return;
+      throw new Error("Manual draft order updates are not supported yet.");
+    }), [doAction]);
+  const makePick = useCallback(async (playerId: number, _teamId: number | null) => {
     await doAction(async () => {
-      const payload: any = { playerId, player_id: playerId, pokemon_id: playerId };
-      if (teamId != null) payload.team_id = teamId;
-      await makePickSvc(draftId, payload);
+      const payload: any = { pokemonId: playerId };
+      await apiFetchJson(`/seasons/${draftId}/draft/pick`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
     }, "Pick locked!");
   }, [doAction, draftId]);
 
   const createLeagueFromDraft = useCallback((leagueName: string) =>
-    doAction(() => createLeagueFromDraftSvc(draftId, leagueName), "League created and draft imported."), [doAction, draftId]);
+    doAction(async () => {
+      if (!leagueName) return;
+      throw new Error("Saving draft results to a league is not supported yet.");
+    }, "League created and draft imported."), [doAction]);
 
   const deleteDraft = useCallback(() =>
-    doAction(() => deleteDraftSvc(draftId), "Draft deleted."), [doAction, draftId]);
+    doAction(async () => {
+      throw new Error("Deleting a draft is not supported yet.");
+    }, "Draft deleted."), [doAction]);
 
   // Username-first display for a team slot
   const teamLabel = useCallback((teamId?: number | null) => {
@@ -325,40 +727,37 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
       searchAbort.current = ac;
 
       const qs = new URLSearchParams();
-      if (filters.q) qs.set("q", filters.q);
+      if (filters.q) qs.set("search", filters.q);
       if (filters.type) qs.set("type", filters.type);
-      if (filters.ability) qs.set("ability", filters.ability);
-      if (filters.move) qs.set("move", filters.move);
-      if (filters.minPoints) qs.set("minPoints", String(filters.minPoints));
-      if (filters.maxPoints) qs.set("maxPoints", String(filters.maxPoints));
-      qs.set("draftableOnly", "1");
+      if (filters.hideDrafted) qs.set("onlyAvailable", "true");
 
       setLoadingPlayers(true);
       try {
-        const res = await fetch(`${API}/players?${qs.toString()}`, {
-          headers: { ...authHeaders() },
+         const j = await apiFetchJson<{
+          items: {
+            pokemonId: number;
+            dexNumber: number | null;
+            name: string;
+            spriteUrl: string | null;
+            baseStats: { hp: number; atk: number; def: number; spa: number; spd: number; spe: number } | null;
+            types: string[];
+            roles: string[];
+            baseCost: number | null;
+            isPicked: boolean;
+          }[];
+        }>(`/seasons/${draftId}/draft/pool?${qs.toString()}`, {
           signal: ac.signal,
         });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j?.error || "Search failed");
-
-        const list = (j.players as any[]).map((p) => {
-          const id = rawId(p);
+         const list = (j.items as any[]).map((p) => {
+          const id = p.pokemonId ?? rawId(p);
           const slug = rawSlug(p);
 
-          const providedBase = coalesce(p.base_name, p.base_species, p.base) ?? null;
-          const providedFormLabel = coalesce(p.form_label, p.form_name, p.variant, p.form) ?? null;
-          const providedFormIndex = coalesce(p.form_index, p.form_number, p.sprite_index, p.variant_index, p.formId) ?? null;
-          const providedGender = coalesce(p.gender, p.sex) ?? null;
-
-          const rawName =
-            p.name ?? p.player_name ?? p.display_name ?? p.full_name ?? p.species ?? p.pokemon ?? unslug(slug);
-
+          const list = (j.items as any[]).map((p) => {
+          const id = p.pokemonId ?? rawId(p);
           const { base: inferredBase, form: inferredForm } = extractBaseAndFormFromName(rawName);
-          const baseName = (providedBase as string | null) ?? inferredBase;
-          const formLabel = (providedFormLabel as string | null) ?? inferredForm;
-
-          const rawPts = p.points ?? p.cost ?? p.value;
+          const baseName = coalesce(p.base_name, p.base_species, p.base) ?? inferredBase;
+          const formLabel = coalesce(p.form_label, p.form_name, p.variant, p.form) ?? inferredForm;
+          const rawPts = p.baseCost ?? p.points ?? p.cost ?? p.value;
           const pts = rawPts == null
             ? NaN
             : Number(typeof rawPts === "string" ? rawPts.trim() : rawPts);
@@ -366,23 +765,20 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
           return {
             ...p,
             id,
-            slug,
+            slug: String(slug || id || ""),
             name: rawName,
+            draftable: !p.isPicked,
             base_name: baseName,
             base_slug: (baseName || "").toLowerCase().replace(/\s+/g, "-"),
             form_label: formLabel,
-            form_index: providedFormIndex != null ? Number(providedFormIndex) : null,
-            gender: providedGender,
+            form_index: null,
+            gender: null,
+            sprite_url: p.spriteUrl ?? p.sprite_url ?? null,
 
             points: Number.isFinite(pts) ? pts : null,
-            types: p.types ?? p.type ?? p.type_list ?? [],
-            abilities: p.abilities ?? p.ability_list ?? p.ability ?? [],
-            base_stats:
-              p.base_stats ??
-              p.stats ?? {
-                hp: p.hp, atk: p.atk, def: p.def,
-                spa: p.spa ?? p.spA, spd: p.spd ?? p.spD, spe: p.spe,
-              },
+            types: p.types ?? [],
+            abilities: p.abilities ?? [],
+            base_stats: p.baseStats ?? null,
           } as PlayerCard;
         });
 
@@ -393,7 +789,7 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
         setLoadingPlayers(false);
       }
     }, 200);
-  }, [filters]);
+  }, [draftId, filters]);
 
   useEffect(() => () => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -554,9 +950,9 @@ function L({ label, children }: { label: string; children: React.ReactNode }) {
 function CoveragePanel({ myTeamPlayers }: { myTeamPlayers: PlayerCard[] }) {
   const [mode, setMode] = useState<"team" | "defense">("team");
 
-  const have = useMemo(() => teamTypeSet(myTeamPlayers), [myTeamPlayers]);
+  const have = useMemo(() => teamTypeSet(myTeamPlayers.map((p) => p.types ?? [])), [myTeamPlayers]);
   const missing = useMemo(() => TYPES.filter(t => !have.has(t)), [have]);
-  const defenseRows = useMemo(() => defenseSummary(myTeamPlayers), [myTeamPlayers]);
+  const defenseRows = useMemo(() => defenseSummary(myTeamPlayers.map((p) => p.types ?? [])), [myTeamPlayers]);
 
   return (
     <div className="rounded-2xl p-3 bg-black/30 border border-white/5 h-full grid grid-rows-[auto_1fr] gap-2">
@@ -768,10 +1164,7 @@ function DetailsSheet({
                 </button>
 
                 <Sprite
-                  slug={player.slug}
-                  baseName={player.base_name || baseFromSlug(player.slug)}
-                  formIndex={player.form_index ?? null}
-                  gender={player.gender ?? undefined}
+                  src={resolveSpriteUrl(player)}
                   alt={player.name}
                   className="absolute inset-0 m-auto w-[85%] h-[85%] object-contain"
                 />
@@ -832,7 +1225,7 @@ function SettingsPanel({
     setRounds(draft.rounds);
     setType(draft.type);
     setCap(draft.points_cap == null ? "" : String(draft.points_cap));
-  }, [draft?.id]); // eslint-disable-line
+  }, [draft?.clock_seconds, draft?.points_cap, draft?.rounds, draft?.type]); // eslint-disable-line
 
   async function save() {
     const body: any = { clock_seconds: Number(clock) };
@@ -944,10 +1337,7 @@ function PlayerCardFlip({
                 </button>
 
                 <Sprite
-                  slug={player.slug}
-                  baseName={player.base_name || baseFromSlug(player.slug)}
-                  formIndex={player.form_index ?? null}
-                  gender={player.gender ?? undefined}
+                  src={resolveSpriteUrl(player)}
                   alt={dispName}
                   className="absolute inset-0 m-auto w-32 h-32 object-contain"
                 />
@@ -1071,10 +1461,7 @@ function PlayerCardClassic({
             </button>
 
             <Sprite
-              slug={player.slug}
-              baseName={player.base_name || baseFromSlug(player.slug)}
-              formIndex={player.form_index ?? null}
-              gender={player.gender ?? undefined}
+              src={resolveSpriteUrl(player)}
               alt={dispName}
               className="absolute inset-0 m-auto w-28 h-28 md:w-32 md:h-32 object-contain"
             />
@@ -1241,13 +1628,16 @@ function EndOfDraftModal({
    ======================================================== */
 export default function DraftRoomPage() {
   const r = useRouter();
-  const params = useParams<{ id: string }>();
-  const draftId = Number(params?.id);
+  const params = useParams<{ seasonId: string }>();
+  const draftId = Number(params?.seasonId);
   const FINALIZED_KEY = `draft:${draftId}:finalized`;
   const isMobile = useIsMobile();
+  const { user, isLoading, logout } = useAuth();
 
   // auth guard
-  useEffect(() => { if (!isLoggedIn()) r.push("/login"); }, [r]);
+  useEffect(() => {
+    if (!isLoading && !user) r.push("/login");
+  }, [isLoading, r, user]);
 
   // room state + actions
   const room = useDraftRoom(draftId);
@@ -1275,6 +1665,31 @@ export default function DraftRoomPage() {
     filtersCollapsed, setFiltersCollapsed, activeFilterCount,
   } = pool;
 
+const draftConfig = useMemo(() => ({
+    clock_seconds: state?.draft?.clock_seconds ?? lobby?.draft?.clock_seconds ?? 0,
+    points_cap: state?.draft?.points_cap ?? lobby?.draft?.points_cap ?? null,
+    rounds: state?.draft?.rounds ?? lobby?.draft?.rounds ?? null,
+    type: state?.draft?.type ?? lobby?.draft?.type ?? "snake",
+  }), [lobby?.draft, state?.draft]);
+
+  const orderRows = useMemo<OrderRow[]>(() => {
+    if (state?.order?.length) return state.order;
+    const participants = lobby?.participants ?? [];
+    const ordered = participants
+      .filter((p) => p.team_id != null)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    return ordered.map((p, idx) => ({
+      slot: p.position ?? idx + 1,
+      team_id: p.team_id as number,
+    }));
+  }, [lobby?.participants, state?.order]);
+
+  const nextSlot = useMemo(() => {
+    if (!orderRows.length) return null;
+    if (state?.next?.onClockTeamId == null) return null;
+    return orderRows.find((o) => o.team_id === state.next?.onClockTeamId)?.slot ?? null;
+  }, [orderRows, state?.next?.onClockTeamId]);
+  
   // page-scoped UI state
   const [showOrderEditor, setShowOrderEditor] = useState(false);
   const [endedPromptOpen, setEndedPromptOpen] = useState(false);
@@ -1311,7 +1726,7 @@ export default function DraftRoomPage() {
   );
 
   // Cap guard + Draft spam guard
-  const cap = state?.draft.points_cap ?? null;
+  const cap = draftConfig.points_cap ?? null;
   const pointsOf = useCallback((id?: number | null) => {
     if (!id) return 0;
     const pc = playersById.get(id);
@@ -1379,7 +1794,7 @@ export default function DraftRoomPage() {
 </head>
 <body>
   <h1>Draft Board</h1>
-  <div class="meta">Draft #${draftId} • Type: ${(state?.draft.type || "").toUpperCase()} • Rounds: ${state?.draft.rounds ?? "—"}</div>
+<div class="meta">Draft #${draftId} • Type: ${String(draftConfig.type || "").toUpperCase()} • Rounds: ${draftConfig.rounds ?? "—"}</div>
   <table>
     <thead>
       <tr><th>Overall</th><th>Round</th><th>Team</th><th>Player</th><th>Types</th></tr>
@@ -1456,7 +1871,10 @@ export default function DraftRoomPage() {
           </button>
           <button
             className="text-xs px-3 py-1 rounded-lg bg-danger hover:brightness-110"
-            onClick={() => { logout(); r.push("/login"); }}
+            onClick={async () => {
+              await logout();
+              r.push("/login");
+            }}
           >
             Log out
           </button>
@@ -1481,7 +1899,7 @@ export default function DraftRoomPage() {
             <div>
               Team: <b>{state?.next?.onClockTeamId ? teamLabel(state?.next?.onClockTeamId) : userLabelByUserId(state?.next as any)}</b>
             </div>
-            <div>Timer: <b>{state?.draft?.clock_seconds === 0 ? "Unlimited" : `${remaining}s`}</b></div>
+            <div>Timer: <b>{draftConfig.clock_seconds === 0 ? "Unlimited" : `${remaining}s`}</b></div>
           </div>
 
           {isCommish && (
@@ -1490,9 +1908,9 @@ export default function DraftRoomPage() {
                 <button
                   onClick={room.startDraft}
                   className="px-3 py-2 rounded-xl bg-success text-black hover:brightness-110 disabled:opacity-60"
-                  disabled={loading || !(isCommish && status !== "ended" && (state?.order?.length ?? 0) >= 2)}
+                  disabled={loading || !(isCommish && status !== "ended" && orderRows.length >= 2)}
                   aria-label="Start draft"
-                  title={!(isCommish && status !== "ended" && (state?.order?.length ?? 0) >= 2) ? "Set a draft order first" : "Start draft"}
+                    title={!(isCommish && status !== "ended" && orderRows.length >= 2) ? "Set a draft order first" : "Start draft"}
                 >Start</button>
               )}
               {status === "active" && (
@@ -1535,12 +1953,12 @@ export default function DraftRoomPage() {
             <h3 className="text-lg font-semibold">Room</h3>
             <div className="mt-2 text-sm">
               <div>Status: <b>{status}</b></div>
-              <div>Type: <b>{state?.draft?.type}</b> • Rounds: <b>{state?.draft?.rounds}</b></div>
-              <div>Teams in order: <b>{state?.order?.length ?? 0}</b></div>
-            </div>
-            {isCommish && (
-              <SettingsPanel draft={state?.draft} onSave={room.saveSettings} disabled={loading || status === "ended"} />
-            )}
+              <div>Type: <b>{draftConfig.type}</b> • Rounds: <b>{draftConfig.rounds}</b></div>
+            <div>Teams in order: <b>{orderRows.length}</b></div>
+          </div>
+          {isCommish && (
+            <SettingsPanel draft={draftConfig} onSave={room.saveSettings} disabled={loading || status === "ended"} />
+          )}
             <div className="mt-3">
               <PresenceList presence={lobby?.presence ?? []} participants={lobby?.participants ?? []} />
             </div>
@@ -1573,10 +1991,7 @@ export default function DraftRoomPage() {
                       >
                         <div className="relative h-10 w-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden">
                           <Sprite
-                            slug={p.slug}
-                            baseName={p.base_name || baseFromSlug(p.slug)}
-                            formIndex={p.form_index ?? null}
-                            gender={p.gender ?? undefined}
+                             src={resolveSpriteUrl(p)}
                             alt={dispName}
                             className="absolute inset-0 m-auto w-[85%] h-[85%] object-contain"
                           />
@@ -1623,12 +2038,13 @@ export default function DraftRoomPage() {
         <div className="rounded-2xl p-4 bg-surface-2 border border-white/5">
           <h3 className="text-lg font-semibold">Draft order</h3>
           <ol className="mt-2 grid gap-1 text-sm">
-            {state?.order?.length ? (
-              state.order.map((o: OrderRow) => (
+            {orderRows.length ? (
+              orderRows.map((o: OrderRow) => (
                 <li
                   key={o.slot}
                   className={`px-3 py-2 rounded-xl ${
-                    state?.next?.slot === o.slot ? "bg-brand text-black" : "bg-black/30 border border-white/5"
+                    nextSlot === o.slot ? "bg-brand text-black" : "bg-black/30 border border-white/5"
+					
                   }`}
                 >
                   <span className="opacity-70 mr-2">#{o.slot}</span>
@@ -1694,10 +2110,7 @@ export default function DraftRoomPage() {
 
                       {slug ? (
                         <Sprite
-                          slug={slug}
-                          baseName={baseName}
-                          formIndex={pc?.form_index ?? null}
-                          gender={gender ?? undefined}
+                          src={resolveSpriteUrl(pc)}
                           alt={nameFmt}
                           className="absolute inset-0 m-auto w-[80%] h-[80%] object-contain"
                         />
@@ -1844,7 +2257,7 @@ export default function DraftRoomPage() {
       {isCommish && showOrderEditor && (
         <OrderEditor
           participants={lobby?.participants ?? []}
-          currentOrder={(state?.order ?? []).map((o) => o.team_id)}
+          currentOrder={orderRows.map((o) => o.team_id)}
           onClose={() => setShowOrderEditor(false)}
           onSave={async (seq) => { await room.saveOrder(seq); setShowOrderEditor(false); }}
         />
