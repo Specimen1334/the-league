@@ -1,53 +1,51 @@
+// app/layout.tsx
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Link from "next/link";
-import { ThemeSwitcher } from "./ThemeSwitcher";
-import { NavAuthControls } from "./NavAuthControls";
-import { Providers } from "./Providers";
+import TopNav from "@/components/TopNav";
+import Script from "next/script";
+import { Toaster } from "sonner"; // global toasts
+import { GlobalMessenger } from "@/components/messenger/GlobalMessenger"; // 🌟 NEW
 
-export const metadata = {
-  title: "The League",
-  description: "Fantasy league manager"
+const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: "TheLeague",
+  description: "Fantasy League Manager",
 };
 
-export default function RootLayout(props: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="app-root" data-theme="light">
-        <Providers>
-          <div className="app-shell">
-            <header className="app-header">
-              <nav className="app-nav">
-                <Link href="/" className="heading-sm">
-                  The League
-                </Link>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        <Script id="theme-init" strategy="beforeInteractive">
+          {`
+            (function () {
+              try {
+                var saved = localStorage.getItem('theme');
+                var theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
+                var root = document.documentElement;
+                if (theme === 'dark') { root.classList.add('dark'); }
+                else { root.classList.remove('dark'); }
+              } catch (e) {}
+            })();
+          `}
+        </Script>
+      </head>
 
-                <div className="app-nav-actions">
-                  <ThemeSwitcher />
+      <body className={`${geistSans.variable} ${geistMono.variable} bg-slate-900 text-slate-100`}>
+        <TopNav />
 
-                  <Link href="/dashboard" className="btn btn-sm btn-ghost">
-                    Dashboard
-                  </Link>
-                  <Link href="/leagues" className="btn btn-sm btn-ghost">
-                    Leagues
-                  </Link>
-                  <Link href="/pokedex" className="btn btn-sm btn-ghost">
-                    Pokedex
-                  </Link>
-                  <Link href="/inbox" className="btn btn-sm btn-ghost">
-                    Inbox
-                  </Link>
-                  <Link href="/profile" className="btn btn-sm btn-ghost">
-                    Profile
-                  </Link>
+        <main className="max-w-[1100px] mx-auto p-4">
+          {children}
+        </main>
 
-                  <NavAuthControls />
-                </div>
-              </nav>
-            </header>
+        {/* Global toast portal */}
+        <Toaster richColors position="top-right" closeButton />
 
-            {props.children}
-          </div>
-        </Providers>
+        {/* 🌟 Global Messenger Dock */}
+        <GlobalMessenger />
       </body>
     </html>
   );

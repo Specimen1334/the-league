@@ -579,7 +579,7 @@ const isCommissioner = useMemo(() => {
       const reloadAll = () => { loadState(); loadLobby(); };
       es.addEventListener("draft:presence", () => setTimeout(loadLobby, 50));
       es.addEventListener("draft:lobby", () => setTimeout(loadLobby, 50));
-      es.addEventListener("draft:state", () => reloadAll());
+      es.addEventListener("draft:watchlist", () => reloadAll());
       es.onerror = () => {
         es?.close();
         if (!mountedRef.current) return;
@@ -712,8 +712,13 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
     if (!s) return "";
     return s.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
-  const rawId = (p: any) => p.id ?? p.player_id ?? p.pokemon_id ?? undefined;
-  const rawSlug = (p: any) => p.slug ?? p.player_slug ?? String(rawId(p) ?? "");
+  function slugify(value: string): string {
+    return value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "");
+  }
 
   // Debounced + abortable search to avoid races
   const searchAbort = useRef<AbortController | null>(null);
@@ -729,11 +734,12 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
       const qs = new URLSearchParams();
       if (filters.q) qs.set("search", filters.q);
       if (filters.type) qs.set("type", filters.type);
+	  if (filters.ability) qs.set("role", filters.ability);
       if (filters.hideDrafted) qs.set("onlyAvailable", "true");
 
       setLoadingPlayers(true);
       try {
-         const j = await apiFetchJson<{
+        const j = await apiFetchJson<{
           items: {
             pokemonId: number;
             dexNumber: number | null;
@@ -748,13 +754,11 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
         }>(`/seasons/${draftId}/draft/pool?${qs.toString()}`, {
           signal: ac.signal,
         });
-         const list = (j.items as any[]).map((p) => {
-          const id = p.pokemonId ?? rawId(p);
-          const slug = rawSlug(p);
-
-          const list = (j.items as any[]).map((p) => {
-          const id = p.pokemonId ?? rawId(p);
-          const { base: inferredBase, form: inferredForm } = extractBaseAndFormFromName(rawName);
+        const list = (j.items as any[]).map((p) => {
+          const id = p.pokemonId ?? p.id;
+          const rawName = p.name ?? "";
+          const slug = p.slug ?? slugify(rawName || String(id ?? ""));
+          const { base: inferredBase, form: inferredForm } = extractBaseAndFormFromName(rawName || unslug(String(slug)));
           const baseName = coalesce(p.base_name, p.base_species, p.base) ?? inferredBase;
           const formLabel = coalesce(p.form_label, p.form_name, p.variant, p.form) ?? inferredForm;
           const rawPts = p.baseCost ?? p.points ?? p.cost ?? p.value;
@@ -766,7 +770,7 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
             ...p,
             id,
             slug: String(slug || id || ""),
-            name: rawName,
+            name: rawName || unslug(String(slug)),
             draftable: !p.isPicked,
             base_name: baseName,
             base_slug: (baseName || "").toLowerCase().replace(/\s+/g, "-"),
@@ -777,7 +781,7 @@ function usePlayerPool(draftId: number, state: StateResp | null) {
 
             points: Number.isFinite(pts) ? pts : null,
             types: p.types ?? [],
-            abilities: p.abilities ?? [],
+            abilities: p.roles ?? p.abilities ?? [],
             base_stats: p.baseStats ?? null,
           } as PlayerCard;
         });
